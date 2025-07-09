@@ -1,0 +1,36 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-I.",
+      "-D",
+      "TOTAL_SIZE=2097152",
+      "-D",
+      "SECTOR_SIZE=4096",
+      "-o",
+      "main.o",
+      "main.c"
+    ],
+    "directory": "/home/jayden/lilotaFS",
+    "file": "/home/jayden/lilotaFS/main.c",
+    "output": "/home/jayden/lilotaFS/main.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-I.",
+      "-D",
+      "TOTAL_SIZE=2097152",
+      "-D",
+      "SECTOR_SIZE=4096",
+      "-o",
+      "flash.o",
+      "flash.c"
+    ],
+    "directory": "/home/jayden/lilotaFS",
+    "file": "/home/jayden/lilotaFS/flash.c",
+    "output": "/home/jayden/lilotaFS/flash.o"
+  }
+]

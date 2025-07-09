@@ -1,0 +1,4 @@
+*.o
+.cache/
+lilotaFS
+*.bin
