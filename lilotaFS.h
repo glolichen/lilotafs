@@ -1,0 +1,69 @@
+#ifndef LILOTAHS_H
+#define LILOTAHS_H
+
+#include <stdint.h>
+
+#define FS_HEADER_ALIGN 32
+
+#define ALIGN_DOWN(addr) ((addr) & (~(FS_HEADER_ALIGN - 1)))
+#define ALIGN_UP(addr) ((addr) % FS_HEADER_ALIGN == 0 ? (addr) : ((ALIGN_DOWN(addr)) + FS_HEADER_ALIGN))
+
+#define FS_SUCCESS 0 // Operation successful
+#define FS_ENOSPC -1 // Insufficient space
+#define FS_EINVAL -2 // Invalid parameters
+#define FS_EEXIST -3 // File already exists (create-only)
+#define FS_ENOENT -4 // File not found
+#define FS_ESPIPE -5 // Seek not supported on writable files
+#define FS_EBADF -6 // Invalid file descriptor
+#define FS_EMFILE -7 // Too many open files
+#define FS_EPERM -8 // Operation not permitted
+#define FS_EFLASH -9 // Flash write problem
+
+#define FS_MAX_FILENAME_LEN 63
+
+#define FS_CREATE 1
+#define FS_READABLE 2
+#define FS_WRITABLE 4
+
+enum fs_record_status {
+	STATUS_ERASED = 0xFF, // 11111111
+	STATUS_RESERVED = 0xFE, // 11111110
+	STATUS_COMMITTED = 0xFC, // 11111100
+	STATUS_MIGRATING = 0xF8, // 11111000
+	STATUS_WRAP_MARKER = 0xF0, // 11110000
+	STATUS_WEAR_MARKER = 0xE0, // 11100000
+	STATUS_DELETED = 0x00, // 00000000
+};
+
+enum fs_magic {
+	FS_RECORD = 0x5AA5,
+	FS_START = 0x5A00,
+	FS_START_CLEAN = 0x5AA0
+};
+
+struct fs_rec_header {
+	uint16_t magic; // See §3.4
+	uint8_t status; // See §3.5
+	uint32_t data_len; // Length of the Data field.
+};
+
+struct fs_file_descriptor {
+	char *filename;
+	uint32_t offset;
+	void *cache;
+};
+
+uint32_t lfs_set_file(int fd);
+uint32_t lfs_mount();
+
+uint32_t vfs_open(const char *name, int flags);
+uint32_t vfs_close(uint32_t fd);
+uint32_t vfs_write(uint32_t fd, void *buffer, uint32_t len);
+uint32_t vfs_get_size(uint32_t fd);
+uint32_t vfs_read(uint32_t fd, void *buffer, uint32_t addr, uint32_t len);
+uint32_t vfs_delete(uint32_t fd);
+
+uint32_t vfs_get_largest_file_size();
+
+#endif 
+

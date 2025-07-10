@@ -9,10 +9,11 @@
 #define FLASH_MALLOC_ERROR 102
 #define FLASH_OUT_OF_BOUNDS 103
 
-int flash_read(FILE *fd, void *buffer, uint32_t address, uint32_t length);
-int flash_write(FILE *fd, const void *buffer, uint32_t address, uint32_t length);
-int flash_erase_region(FILE *fd, uint32_t start, uint32_t len);
-int flash_erase_chip(FILE *fd);
+uint32_t flash_get_total_size();
+uint32_t flash_get_sector_size();
+
+int flash_write(uint8_t *mmap, const void *buffer, uint32_t address, uint32_t length);
+int flash_erase_region(uint8_t *mmap, uint32_t start, uint32_t len);
 
 #endif
 
