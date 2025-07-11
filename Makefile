@@ -8,7 +8,7 @@ CFLAGS=-I. -D TOTAL_SIZE=$(TOTAL_SIZE) -D SECTOR_SIZE=$(SECTOR_SIZE) \
 	   -Wall -Wextra -fsanitize=undefined -static-libasan -g
 OBJ = lilotaFS.o flash.o
 
-build: $(OBJ) main.o
+build: $(OBJ) test.o
 	$(CC) -o lilotaFS $^ $(CFLAGS)
 
 gen_test: $(OBJ) gen_test_disk.o

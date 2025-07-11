@@ -4,6 +4,7 @@
 #include <stdint.h>
 
 #define FS_HEADER_ALIGN 32
+#define WEAR_LEVEL_MAX_RECORDS 5
 
 #define ALIGN_DOWN(addr) ((addr) & (~(FS_HEADER_ALIGN - 1)))
 #define ALIGN_UP(addr) ((addr) % FS_HEADER_ALIGN == 0 ? (addr) : ((ALIGN_DOWN(addr)) + FS_HEADER_ALIGN))
@@ -50,7 +51,6 @@ struct fs_rec_header {
 struct fs_file_descriptor {
 	char *filename;
 	uint32_t offset;
-	void *cache;
 };
 
 uint32_t lfs_set_file(int fd);
@@ -63,7 +63,10 @@ uint32_t vfs_get_size(uint32_t fd);
 uint32_t vfs_read(uint32_t fd, void *buffer, uint32_t addr, uint32_t len);
 uint32_t vfs_delete(uint32_t fd);
 
-uint32_t vfs_get_largest_file_size();
+uint32_t lfs_get_largest_file_size();
+uint32_t lfs_get_largest_filename_len();
+uint32_t lfs_get_head();
+uint32_t lfs_get_tail();
 
 #endif 
 

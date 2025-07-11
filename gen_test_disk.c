@@ -9,8 +9,8 @@
 
 #define FILE_SIZE_MIN 20
 #define FILE_SIZE_MAX 200
-#define LOW_FILE_COUNT 3
-#define HIGH_FILE_COUNT 5
+#define LOW_FILE_COUNT 0
+#define HIGH_FILE_COUNT 8
 #define GAP_LENGTH_MIN 100
 #define GAP_LENGTH_MAX 400
 
