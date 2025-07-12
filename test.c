@@ -21,7 +21,7 @@ uint32_t random_number(uint32_t min, uint32_t max) {
 // d [fd]                 | delete file [fd]
 // c [fd]                 | close file [fd]
 // o [create?] [filename] | open file with name [filename], choose whether to create
-// q                      | query filesystem for largest file size, head and tail
+// q                      | query filesystem for information
 
 
 int main(int argc, char *argv[]) {
@@ -128,10 +128,12 @@ int main(int argc, char *argv[]) {
 			free(data);
 		}
 		else if (mode == 'q') {
+			uint32_t count = lfs_count_files();
 			uint32_t largest_file = lfs_get_largest_file_size();
 			uint32_t largest_filename_len = lfs_get_largest_filename_len();
 			uint32_t head = lfs_get_head();
 			uint32_t tail = lfs_get_tail();
+			printf("number of files: %u\n", count);
 			printf("largest file: %u\n", largest_file);
 			printf("largest filename len: %u\n", largest_filename_len);
 			printf("head: 0x%x\n", head);

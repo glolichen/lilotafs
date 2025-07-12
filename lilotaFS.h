@@ -2,6 +2,7 @@
 #define LILOTAHS_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #define FS_HEADER_ALIGN 32
 #define WEAR_LEVEL_MAX_RECORDS 5
@@ -10,15 +11,16 @@
 #define ALIGN_UP(addr) ((addr) % FS_HEADER_ALIGN == 0 ? (addr) : ((ALIGN_DOWN(addr)) + FS_HEADER_ALIGN))
 
 #define FS_SUCCESS 0 // Operation successful
-#define FS_ENOSPC -1 // Insufficient space
-#define FS_EINVAL -2 // Invalid parameters
-#define FS_EEXIST -3 // File already exists (create-only)
-#define FS_ENOENT -4 // File not found
-#define FS_ESPIPE -5 // Seek not supported on writable files
-#define FS_EBADF -6 // Invalid file descriptor
-#define FS_EMFILE -7 // Too many open files
-#define FS_EPERM -8 // Operation not permitted
-#define FS_EFLASH -9 // Flash write problem
+#define FS_ENOSPC (UINT32_MAX - 1) // Insufficient space
+#define FS_EINVAL (UINT32_MAX - 2) // Invalid parameters
+#define FS_EEXIST (UINT32_MAX - 3) // File already exists (create-only)
+#define FS_ENOENT (UINT32_MAX - 4) // File not found
+#define FS_ESPIPE (UINT32_MAX - 5) // Seek not supported on writable files
+#define FS_EBADF (UINT32_MAX - 6) // Invalid file descriptor
+#define FS_EMFILE (UINT32_MAX - 7) // Too many open files
+#define FS_EPERM (UINT32_MAX - 8) // Operation not permitted
+#define FS_EFLASH (UINT32_MAX - 9) // Flash write problem
+#define FS_EUNKNOWN (UINT32_MAX - 10) // ???
 
 #define FS_MAX_FILENAME_LEN 63
 
@@ -49,12 +51,13 @@ struct fs_rec_header {
 };
 
 struct fs_file_descriptor {
-	char *filename;
+	bool in_use;
 	uint32_t offset;
 };
 
 uint32_t lfs_set_file(int fd);
 uint32_t lfs_mount();
+uint32_t lfs_unmount();
 
 uint32_t vfs_open(const char *name, int flags);
 uint32_t vfs_close(uint32_t fd);
@@ -62,6 +65,8 @@ uint32_t vfs_write(uint32_t fd, void *buffer, uint32_t len);
 uint32_t vfs_get_size(uint32_t fd);
 uint32_t vfs_read(uint32_t fd, void *buffer, uint32_t addr, uint32_t len);
 uint32_t vfs_delete(uint32_t fd);
+
+uint32_t lfs_count_files();
 
 uint32_t lfs_get_largest_file_size();
 uint32_t lfs_get_largest_filename_len();

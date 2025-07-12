@@ -71,24 +71,41 @@ struct fs_rec_header *process_header(struct fs_rec_header *cur_header, uint32_t 
 	return (struct fs_rec_header *) next_offset;
 }
 
-struct fs_rec_header *found_wear_marker;
-
-// will also find the largest file
-struct fs_rec_header *scan_headers(struct fs_rec_header *start, uint32_t partition_size) {
+struct scan_headers_result {
+	struct fs_rec_header *last_header, *wear_marker;
+	uint32_t num_files;
+} scan_headers(struct fs_rec_header *start, uint32_t partition_size) {
 	struct fs_rec_header *cur_header = start;
+	struct scan_headers_result ret = {
+		.last_header = cur_header,
+		.wear_marker = NULL,
+		.num_files = 0
+	};
+
 	if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START && cur_header->magic != FS_START_CLEAN)
-		return cur_header;
+		return ret;
+
+	char *filename = (char *) cur_header + sizeof(struct fs_rec_header);
+	if (cur_header->status == STATUS_COMMITTED && cur_header->magic != FS_START && strlen(filename) != 0)
+		ret.num_files++;
+
 	while (1) {
 		if (cur_header->status == STATUS_WEAR_MARKER)
-			found_wear_marker = cur_header;
+			ret.wear_marker = cur_header;
 		struct fs_rec_header *next_header = process_header(cur_header, partition_size);
 		if (!next_header)
 			break;
 		cur_header = next_header;
 		if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START && cur_header->magic != FS_START_CLEAN)
 			break;
+
+		// the dummy start header does not count
+		char *filename = (char *) cur_header + sizeof(struct fs_rec_header);
+		if (cur_header->status == STATUS_COMMITTED && cur_header->magic != FS_START && strlen(filename) != 0)
+			ret.num_files++;
 	}
-	return cur_header;
+	ret.last_header = cur_header;
+	return ret;
 }
 
 uint32_t change_file_status(struct fs_rec_header *file_header, uint8_t status) {
@@ -198,7 +215,9 @@ uint32_t append_file(const char *filename, uint32_t *current_offset, void *buffe
 		char empty = 0;
 		uint32_t current_offset = UINT32_MAX;
 		has_wear_marker = true;
-		return append_file(&empty, &current_offset, NULL, 0, STATUS_WEAR_MARKER, false);
+		uint32_t code = append_file(&empty, &current_offset, NULL, 0, STATUS_WEAR_MARKER, false);
+		if (code != FS_SUCCESS)
+			return code;
 	}
 
 	*current_offset = new_file_offset;
@@ -213,19 +232,142 @@ uint32_t lfs_set_file(int fd) {
 	return 0;
 }
 
+uint32_t wear_level_compact(struct fs_rec_header *wear_marker, uint32_t num_files) {
+	uint32_t partition_size = flash_get_total_size();
+
+	// 1. delete wear marker
+	if (change_file_status(wear_marker, STATUS_DELETED))
+		return FS_EFLASH;
+
+	// 2. copy each of next WEAR_LEVEL_MAX_RECORDS files to tail
+	uint32_t count = WEAR_LEVEL_MAX_RECORDS < num_files ? WEAR_LEVEL_MAX_RECORDS : num_files;
+
+	struct fs_rec_header *cur_header = (struct fs_rec_header *) (flash_mmap + fs_head);
+
+	// this should be impossible
+	if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START && cur_header->magic != FS_START_CLEAN) {
+		printf("??????????\n");
+		return FS_EUNKNOWN;
+	}
+
+	while (1) {
+		// scan for the next non-deleted file
+		bool has_next_header = false;
+		struct fs_rec_header *next_header = cur_header;
+		while (1) {
+			next_header = process_header(next_header, partition_size);
+			// check if there is a next file
+			if (!next_header)
+				break;
+			if (next_header->magic != FS_RECORD && next_header->magic != FS_START && next_header->magic != FS_START_CLEAN)
+				break;
+			// if file is committed, we have found the next file
+			if (next_header->status == STATUS_COMMITTED) {
+				has_next_header = true;
+				break;
+			}
+			// if we encounter a deleted file, set its magic to 00 00, like all other files we encounter
+			if (change_file_magic(next_header, 0x0000))
+				return FS_EFLASH;
+		}
+
+		if (!has_next_header)
+			break;
+
+		uint32_t next_offset = (uint64_t) next_header - (uint64_t) flash_mmap;
+
+		// move the current file to the tail
+		uint32_t cur_previous_offset = (uint64_t) cur_header - (uint64_t) flash_mmap;
+		uint32_t cur_new_offset = cur_previous_offset;
+
+		char *filename = (char *) cur_header + sizeof(struct fs_rec_header);
+		uint8_t *data_start = (uint8_t *) (filename + strlen(filename) + 1);
+
+		// NOTE: if we mount the filesystem and do not find a FS_START record
+		// we create a record at offset 0 with magic FS_START and length 0
+		// we do NOT want to move that record
+		if (!(cur_header->data_len == 0 && cur_previous_offset == 0)) {
+			uint32_t code = append_file(filename, &cur_new_offset,
+							   data_start, cur_header->data_len, STATUS_COMMITTED, false);
+			count--;
+			if (code != FS_SUCCESS)
+				return code;
+		}
+
+		// make the next file the new FS_START
+		uint32_t sector_size = flash_get_sector_size();
+		// within same flash block/sector
+		if (next_offset / sector_size == cur_previous_offset / sector_size) {
+			if (change_file_magic((struct fs_rec_header *) (flash_mmap + next_offset), FS_START))
+				return FS_EFLASH;
+			if (change_file_magic((struct fs_rec_header *) (flash_mmap + cur_previous_offset), 0x0000))
+				return FS_EFLASH;
+		}
+		// across blocks
+		else {
+			// write the next header as FS_START_CLEAN
+			if (change_file_magic((struct fs_rec_header *) (flash_mmap + next_offset), FS_START_CLEAN))
+				return FS_EFLASH;
+
+			// clobber part of block the new file is in, that is before the file
+			if (next_offset % sector_size != 0) {
+				uint8_t *zero = (uint8_t *) calloc(next_offset % sector_size, sizeof(uint8_t));
+				if (flash_write(flash_mmap, zero, (next_offset / sector_size) * sector_size, next_offset % sector_size))
+					return FS_EFLASH;
+			}
+
+			// previous offset cannot be in the same sector as tail
+			if (fs_tail / sector_size == cur_previous_offset / sector_size)
+				return FS_ENOSPC;
+
+			// erase old blocks, in reverse order (large address -> small address)
+			for (uint32_t sector = cur_previous_offset / sector_size;
+			sector < next_offset / sector_size; sector--) {
+
+				if (flash_erase_region(flash_mmap, sector * sector_size, sector_size))
+					return FS_EFLASH;
+			}
+
+			if (change_file_magic((struct fs_rec_header *) (flash_mmap + next_offset), FS_START))
+				return FS_EFLASH;
+		}
+
+		cur_header = next_header;
+
+		if (count == 0) {
+			fs_head = next_offset;
+			cur_header = scan_headers(cur_header, partition_size).last_header;
+			fs_tail = (uint64_t) cur_header - (uint64_t) flash_mmap;
+			break;
+		}
+	}
+
+	return FS_SUCCESS;
+}
+
 uint32_t lfs_mount() {
 	largest_file_size = 0, largest_filename_len = 0;
 	fs_head = 0, fs_tail = 0;
 	has_wear_marker = false;
 
-	found_wear_marker = NULL;
-
 	uint32_t partition_size = flash_get_total_size();
 
 	struct fs_rec_header *cur_header = (struct fs_rec_header *) flash_mmap;
+	struct fs_rec_header *wear_marker = NULL;
+	uint32_t num_files = 0;
+
+	// if position 0 is an normal file, not the head
 	if (cur_header->magic != FS_START_CLEAN && cur_header->magic != FS_START) {
-		cur_header = scan_headers(cur_header, partition_size);
+		// follow current file until no more
+		// (if no file at 0 this will return cur_header immediately, then offset = 0)
+		struct scan_headers_result scan_result = scan_headers(cur_header, partition_size);
+		cur_header = scan_result.last_header;
+		num_files += scan_result.num_files;
+		if (scan_result.wear_marker)
+			wear_marker = scan_result.wear_marker;
+
 		uint32_t offset = (uint64_t) cur_header - (uint64_t) flash_mmap;
+		// scan disk 1 byte at a time until we find FS_START magic
 		cur_header = scan_for_header(offset, partition_size);
 	}
 
@@ -237,6 +379,7 @@ uint32_t lfs_mount() {
 			.data_len = 0
 		};
 		char empty = 0;
+		// write record and empty filename
 		if (flash_write(flash_mmap, &new_header, 0, sizeof(struct fs_rec_header)))
 			return FS_EFLASH;
 		if (flash_write(flash_mmap, &empty, sizeof(struct fs_rec_header), 1))
@@ -261,118 +404,24 @@ uint32_t lfs_mount() {
 			fs_head = (uint64_t) cur_header - (uint64_t) flash_mmap;
 		}
 
-		cur_header = scan_headers(cur_header, partition_size);
+		// scan until no more files -- set that to tail pointer
+		struct scan_headers_result scan_result = scan_headers(cur_header, partition_size);
+		cur_header = scan_result.last_header;
+		num_files += scan_result.num_files;
+		if (scan_result.wear_marker)
+			wear_marker = scan_result.wear_marker;
+
 		fs_tail = (uint64_t) cur_header - (uint64_t) flash_mmap;
 	}
 
 	printf("head = 0x%lx\n", (uint64_t) fs_head);
 	printf("tail = 0x%lx\n", (uint64_t) fs_tail);
 
-	if (found_wear_marker) {
-		// 1. delete wear marker
-		if (change_file_status(found_wear_marker, STATUS_DELETED))
-			return FS_EFLASH;
-
-		// 2. copy each of next WEAR_LEVEL_MAX_RECORDS files to tail
-		uint32_t count = 0;
-		cur_header = (struct fs_rec_header *) (flash_mmap + fs_head);
-
-		// how would this even happen...
-		if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START && cur_header->magic != FS_START_CLEAN) {
-			printf("??????????\n");
-			return -1;
-		}
-
-		while (1) {
-			// scan for the next non-deleted file
-			bool has_next_header = false;
-			struct fs_rec_header *next_header = cur_header;
-			while (1) {
-				next_header = process_header(next_header, partition_size);
-				if (!next_header)
-					break;
-				if (next_header->magic != FS_RECORD && next_header->magic != FS_START && next_header->magic != FS_START_CLEAN)
-					break;
-				if (next_header->status == STATUS_COMMITTED) {
-					has_next_header = true;
-					break;
-				}
-				if (change_file_magic(next_header, 0x0000))
-					return FS_EFLASH;
-			}
-			
-			// NOTE: there should be no case where there is no next header
-			// (even if there was one file, it was marked deleted, there is also the wear marker)
-			if (!has_next_header)
-				break;
-
-			uint32_t next_offset = (uint64_t) next_header - (uint64_t) flash_mmap;
-
-			// move the current file to the tail
-			uint32_t cur_previous_offset = (uint64_t) cur_header - (uint64_t) flash_mmap;
-			uint32_t cur_new_offset = cur_previous_offset;
-
-			char *filename = (char *) cur_header + sizeof(struct fs_rec_header);
-			uint8_t *data_start = (uint8_t *) (filename + strlen(filename) + 1);
-
-			// NOTE: if we mount the filesystem and do not find a FS_START record
-			// we create a record at offset 0 with magic FS_START and length 0
-			// we do NOT want to move that record
-			if (!(cur_header->data_len == 0 && cur_previous_offset == 0)) {
-				uint32_t code = append_file(filename, &cur_new_offset,
-								   data_start, cur_header->data_len, STATUS_COMMITTED, false);
-				count++;
-				if (code)
-					return code;
-			}
-
-			// make the next file the new FS_START
-			uint32_t sector_size = flash_get_sector_size();
-			// within same flash block/sector
-			if (next_offset / sector_size == cur_previous_offset / sector_size) {
-				if (change_file_magic((struct fs_rec_header *) (flash_mmap + next_offset), FS_START))
-					return FS_EFLASH;
-				if (change_file_magic((struct fs_rec_header *) (flash_mmap + cur_previous_offset), 0x0000))
-					return FS_EFLASH;
-			}
-			// across blocks
-			else {
-				// write the next header as FS_START_CLEAN
-				if (change_file_magic((struct fs_rec_header *) (flash_mmap + next_offset), FS_START_CLEAN))
-					return FS_EFLASH;
-
-				// clobber part of block the new file is in, that is before the file
-				if (next_offset % sector_size != 0) {
-					uint8_t *zero = (uint8_t *) calloc(next_offset % sector_size, sizeof(uint8_t));
-					if (flash_write(flash_mmap, zero, (next_offset / sector_size) * sector_size, next_offset % sector_size))
-						return FS_EFLASH;
-				}
-
-				// previous offset cannot be in the same sector as tail
-				if (fs_tail / sector_size == cur_previous_offset / sector_size)
-					return FS_ENOSPC;
-
-				// erase old blocks, in reverse order (large address -> small address)
-				for (uint32_t sector = cur_previous_offset / sector_size;
-						sector < next_offset / sector_size; sector--) {
-
-					if (flash_erase_region(flash_mmap, sector * sector_size, sector_size))
-						return FS_EFLASH;
-				}
-
-				if (change_file_magic((struct fs_rec_header *) (flash_mmap + next_offset), FS_START))
-					return FS_EFLASH;
-			}
-
-			cur_header = next_header;
-			if (count == WEAR_LEVEL_MAX_RECORDS) {
-				fs_head = next_offset;
-				cur_header = scan_headers(cur_header, partition_size);
-				fs_tail = (uint64_t) cur_header - (uint64_t) flash_mmap;
-				break;
-			}
-		}
-
+	// if we find wear marker, need to perform wear leveling
+	if (wear_marker) {
+		uint32_t code = wear_level_compact(wear_marker, num_files);
+		if (code != FS_SUCCESS)
+			return code;
 		printf("new head = 0x%lx\n", (uint64_t) fs_head);
 		printf("new tail = 0x%lx\n", (uint64_t) fs_tail);
 	}
@@ -412,7 +461,7 @@ uint32_t fd_list_append(struct fs_file_descriptor fd) {
 // returns index in list, or UINT32_MAX on failure
 uint32_t fd_list_add(struct fs_file_descriptor fd) {
 	for (uint32_t i = 0; i < fd_list_size; i++) {
-		if (fd_list[i].filename == NULL) {
+		if (!fd_list[i].in_use) {
 			fd_list[i] = fd;
 			return i;
 		}
@@ -449,23 +498,16 @@ uint32_t vfs_open(const char *name, int flags) {
 	}
 
 	struct fs_file_descriptor fd = {
+		.in_use = true,
 		.offset = UINT32_MAX,
-		.filename = (char *) malloc((filename_len + 1) * sizeof(char)),
 	};
-	memcpy(fd.filename, name, filename_len);
 
 	if (!file_found) {
-		if ((flags & FS_CREATE) != FS_CREATE) {
-			free(fd.filename);
+		if ((flags & FS_CREATE) != FS_CREATE)
 			return -1;
-		}
-
-		uint32_t code = append_file(fd.filename, &fd.offset, NULL, 0, STATUS_COMMITTED, true);
-
-		if (code != FS_SUCCESS) {
-			free(fd.filename);
+		uint32_t code = append_file(name, &fd.offset, NULL, 0, STATUS_COMMITTED, true);
+		if (code != FS_SUCCESS)
 			return -1;
-		}
 		cur_header = (struct fs_rec_header *) (flash_mmap + fd.offset);
 	}
 
@@ -476,27 +518,28 @@ uint32_t vfs_open(const char *name, int flags) {
 }
 
 uint32_t vfs_close(uint32_t fd) {
+	if (fd - 1 >= fd_list_size)
+		return FS_EBADF;
+
 	fd--;
 	if (fd >= fd_list_size)
 		return -1;
 
-	struct fs_file_descriptor descriptor = fd_list[fd];
-
-	if (!descriptor.filename)
-		return -1;
-	free(descriptor.filename);
-	descriptor.filename = NULL;
-
-	descriptor.offset = 0;
+	fd_list[fd].in_use = false;
+	fd_list[fd].offset = 0;
 
 	return 0;
 }
 
 uint32_t vfs_write(uint32_t fd, void *buffer, uint32_t len) {
+	if (fd - 1 >= fd_list_size)
+		return FS_EBADF;
+
 	struct fs_file_descriptor *descriptor = &fd_list[fd - 1];
 	struct fs_rec_header *header = (struct fs_rec_header *) (flash_mmap + descriptor->offset);
+	char *filename = (char *) header + sizeof(struct fs_rec_header);
 
-	uint32_t code = append_file(descriptor->filename, &descriptor->offset, buffer, len, STATUS_COMMITTED, true);
+	uint32_t code = append_file(filename, &descriptor->offset, buffer, len, STATUS_COMMITTED, true);
 	if (code != FS_SUCCESS)
 		return code;
 
@@ -507,19 +550,25 @@ uint32_t vfs_write(uint32_t fd, void *buffer, uint32_t len) {
 	}
 	else if (len >= largest_file_size) {
 		largest_file_size = len;
-		largest_filename_len = strlen(descriptor->filename);
+		largest_filename_len = strlen(filename);
 	}
 
 	return FS_SUCCESS;
 }
 
 uint32_t vfs_get_size(uint32_t fd) {
+	if (fd - 1 >= fd_list_size)
+		return FS_EBADF;
+
 	struct fs_file_descriptor descriptor = fd_list[fd - 1];
 	struct fs_rec_header *header = (struct fs_rec_header *) (flash_mmap + descriptor.offset);
 	return header->data_len;
 }
 
 uint32_t vfs_read(uint32_t fd, void *buffer, uint32_t addr, uint32_t len) {
+	if (fd - 1 >= fd_list_size)
+		return FS_EBADF;
+
 	struct fs_file_descriptor descriptor = fd_list[fd - 1];
 	struct fs_rec_header *header = (struct fs_rec_header *) (flash_mmap + descriptor.offset);
 
@@ -531,6 +580,9 @@ uint32_t vfs_read(uint32_t fd, void *buffer, uint32_t addr, uint32_t len) {
 }
 
 uint32_t vfs_delete(uint32_t fd) {
+	if (fd - 1 >= fd_list_size)
+		return FS_EBADF;
+
 	struct fs_file_descriptor descriptor = fd_list[fd - 1];
 	struct fs_rec_header *header = (struct fs_rec_header *) (flash_mmap + descriptor.offset);
 	if (change_file_status(header, STATUS_DELETED))
@@ -549,12 +601,47 @@ uint32_t vfs_delete(uint32_t fd) {
 		return append_file(&empty, &current_offset, NULL, 0, STATUS_WEAR_MARKER, false);
 	}
 
+	return FS_SUCCESS;
+}
+
+
+// simulate graceful computer shutdown
+uint32_t lfs_unmount() {
+	largest_file_size = 0, largest_filename_len = 0;
+	fs_head = 0, fs_tail = 0;
+	has_wear_marker = false;
+
+	// close all open FDs
+	fd_list_size = 0, fd_list_capacity = 0;
+	free(fd_list);
+
+	munmap(flash_mmap, flash_get_total_size());
 
 	return FS_SUCCESS;
 }
 
 
 
+uint32_t lfs_count_files() {
+	uint32_t count = 0;
+	uint32_t partition_size = flash_get_total_size();
+	struct fs_rec_header *cur_header = (struct fs_rec_header *) (flash_mmap + fs_head);
+	if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START && cur_header->magic != FS_START_CLEAN)
+		return 0;
+	while (1) {
+		char *filename = (char *) cur_header + sizeof(struct fs_rec_header);
+		if ((cur_header->magic == FS_RECORD || cur_header->magic == FS_START) && strlen(filename) != 0)
+			count++;
+
+		struct fs_rec_header *next_header = process_header(cur_header, partition_size);
+		if (!next_header)
+			break;
+		if (next_header->magic != FS_RECORD && next_header->magic != FS_START && next_header->magic != FS_START_CLEAN)
+			break;
+		cur_header = next_header;
+	}
+	return count;
+}
 
 uint32_t lfs_get_largest_file_size() {
 	return largest_file_size;

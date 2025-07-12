@@ -1,6 +1,7 @@
 *.o
 .cache/
-lilotaFS
+test
 gen_test_disk
+torture
 *.bin
 lilotaFS_ai.c
