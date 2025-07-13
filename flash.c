@@ -21,6 +21,8 @@ int flash_write(uint8_t *mmap, const void *buffer, uint32_t address, uint32_t le
 		return FLASH_OUT_OF_BOUNDS;
 	}
 
+	printf("flash: writing %u bytes to 0x%x\n", length, address);
+
 	// check if operation is legal (no changing 0 to 1)
 	uint8_t *write = (uint8_t *) buffer;
 	for (uint32_t i = 0; i < length; i++) {

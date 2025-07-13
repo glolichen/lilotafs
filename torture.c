@@ -15,7 +15,7 @@
 // #define MAX_SIZE 20000
 
 #define FILE_COUNT 30
-#define OP_COUNT 500
+#define OP_COUNT 5000
 
 #define MIN_SIZE 50
 #define MAX_SIZE 5000
