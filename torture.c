@@ -8,11 +8,17 @@
 
 #include "lilotaFS.h"
 
-#define FILE_COUNT 1
-#define OP_COUNT 198
+// #define FILE_COUNT 1
+// #define OP_COUNT 198
+//
+// #define MIN_SIZE 500
+// #define MAX_SIZE 20000
 
-#define MIN_SIZE 500
-#define MAX_SIZE 20000
+#define FILE_COUNT 30
+#define OP_COUNT 500
+
+#define MIN_SIZE 50
+#define MAX_SIZE 5000
 
 struct table_entry {
 	char *filename;

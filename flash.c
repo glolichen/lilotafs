@@ -26,8 +26,10 @@ int flash_write(uint8_t *mmap, const void *buffer, uint32_t address, uint32_t le
 	for (uint32_t i = 0; i < length; i++) {
 		uint8_t current = mmap[address + i];
 		uint8_t byte = write[i] | current;
-		if (byte ^ current)
+		if (byte ^ current) {
+			printf("FLASH WRITE FAILED: address 0x%x\n", address);
 			return 1;
+		}
 	}
 
 	memcpy(mmap + address, buffer, length);

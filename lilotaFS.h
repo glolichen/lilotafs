@@ -11,16 +11,16 @@
 #define ALIGN_UP(addr) ((addr) % FS_HEADER_ALIGN == 0 ? (addr) : ((ALIGN_DOWN(addr)) + FS_HEADER_ALIGN))
 
 #define FS_SUCCESS 0 // Operation successful
-#define FS_ENOSPC (UINT32_MAX - 1) // Insufficient space
-#define FS_EINVAL (UINT32_MAX - 2) // Invalid parameters
-#define FS_EEXIST (UINT32_MAX - 3) // File already exists (create-only)
-#define FS_ENOENT (UINT32_MAX - 4) // File not found
-#define FS_ESPIPE (UINT32_MAX - 5) // Seek not supported on writable files
-#define FS_EBADF (UINT32_MAX - 6) // Invalid file descriptor
-#define FS_EMFILE (UINT32_MAX - 7) // Too many open files
-#define FS_EPERM (UINT32_MAX - 8) // Operation not permitted
-#define FS_EFLASH (UINT32_MAX - 9) // Flash write problem
-#define FS_EUNKNOWN (UINT32_MAX - 10) // ???
+#define FS_ENOSPC (UINT32_MAX - 1) // Insufficient space (4294967294)
+#define FS_EINVAL (UINT32_MAX - 2) // Invalid parameters (...93)
+#define FS_EEXIST (UINT32_MAX - 3) // File already exists (create-only) (...92)
+#define FS_ENOENT (UINT32_MAX - 4) // File not found (...91)
+#define FS_ESPIPE (UINT32_MAX - 5) // Seek not supported on writable files (...90)
+#define FS_EBADF (UINT32_MAX - 6) // Invalid file descriptor (...89)
+#define FS_EMFILE (UINT32_MAX - 7) // Too many open files (...88)
+#define FS_EPERM (UINT32_MAX - 8) // Operation not permitted (...87)
+#define FS_EFLASH (UINT32_MAX - 9) // Flash write problem (...86)
+#define FS_EUNKNOWN (UINT32_MAX - 10) // ??? (...85)
 
 #define FS_MAX_FILENAME_LEN 63
 
