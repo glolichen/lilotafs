@@ -21,7 +21,7 @@ int flash_write(uint8_t *mmap, const void *buffer, uint32_t address, uint32_t le
 		return FLASH_OUT_OF_BOUNDS;
 	}
 
-	printf("flash: writing %u bytes to 0x%x\n", length, address);
+	// printf("flash: writing %u bytes to 0x%x\n", length, address);
 
 	// check if operation is legal (no changing 0 to 1)
 	uint8_t *write = (uint8_t *) buffer;
@@ -44,7 +44,7 @@ int flash_erase_region(uint8_t *mmap, uint32_t start, uint32_t len) {
 	uint32_t sector_size = flash_get_sector_size();
 	if (start % sector_size != 0 || len % sector_size != 0)
 		return FLASH_OUT_OF_BOUNDS;
-	if (start >= total_size || start + len >= total_size)
+	if (start > total_size || start + len > total_size)
 		return FLASH_OUT_OF_BOUNDS;
 
 	memset(mmap + start, 0xFF, len);
