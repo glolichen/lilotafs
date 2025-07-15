@@ -8,17 +8,17 @@
 
 #include "lilotaFS.h"
 
+#define FILE_COUNT 2
+#define OP_COUNT 200
+
+#define MIN_SIZE 200
+#define MAX_SIZE 14000
+
 // #define FILE_COUNT 1
-// #define OP_COUNT 198
+// #define OP_COUNT 1000
 //
-// #define MIN_SIZE 500
-// #define MAX_SIZE 20000
-
-#define FILE_COUNT 1
-#define OP_COUNT 1000
-
-#define MIN_SIZE 50
-#define MAX_SIZE 5000
+// #define MIN_SIZE 50
+// #define MAX_SIZE 5000
 
 struct table_entry {
 	char *filename;
@@ -26,7 +26,7 @@ struct table_entry {
 };
 
 uint32_t random_number(uint32_t min, uint32_t max) {
-	return ((double) rand() / RAND_MAX) * (max - min) + min;
+	return rand() % (max - min + 1) + min;
 }
 
 uint32_t inspect_fs(struct table_entry *files) {
@@ -74,11 +74,16 @@ uint32_t inspect_fs(struct table_entry *files) {
 		}
 		printf("CORRECT: %.63s (%u)\n", entry.filename, i);
 	}
+
+	uint32_t file_count = lfs_count_files();
+	if (file_count != FILE_COUNT)
+		printf("# of files wrong: LFS reports %u\n", file_count);
+
 	return wrong_count;
 }
 
 int main(int argc, char *argv[]) {
-	if (argc < 3) {
+	if (argc < 2) {
 		printf("error: must enter arguments\n");
 		return 1;
 	}
@@ -88,7 +93,13 @@ int main(int argc, char *argv[]) {
 	char *disk_name = argv[1];
 	int disk = open(disk_name, O_RDWR);
 
-	srand(strtoul(argv[2], NULL, 0));
+	if (argc == 3)
+		srand(strtoul(argv[2], NULL, 0));
+	else {
+		time_t cur_time = time(NULL);
+		printf("%ld\n", cur_time);
+		srand(cur_time);
+	}
 
 	lfs_set_file(disk);
 
