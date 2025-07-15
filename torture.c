@@ -8,7 +8,7 @@
 
 #include "lilotaFS.h"
 
-#define FILE_COUNT 2
+#define FILE_COUNT 23
 #define OP_COUNT 200
 
 #define MIN_SIZE 200

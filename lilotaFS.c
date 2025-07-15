@@ -16,6 +16,8 @@ uint32_t largest_file_size, largest_filename_len;
 
 bool has_wear_marker;
 
+#define FLASH_CAN_WRITE(want, current) (!((current) ^ ((want) | (current))))
+
 uint32_t u32_min(uint32_t a, uint32_t b) {
 	return a < b ? a : b;
 }
@@ -79,38 +81,44 @@ struct fs_rec_header *process_advance_header(struct fs_rec_header *cur_header, u
 }
 
 struct scan_headers_result {
-	struct fs_rec_header *last_header, *wear_marker;
+	struct fs_rec_header *last_header, *wear_marker, *wrap_marker, *migrating, *reserved;
 	uint32_t num_files;
 } scan_headers(struct fs_rec_header *start, uint32_t partition_size) {
 	struct fs_rec_header *cur_header = start;
 	struct scan_headers_result ret = {
 		.last_header = cur_header,
 		.wear_marker = NULL,
+		.wrap_marker = NULL,
+		.migrating = NULL,
+		.reserved = NULL,
 		.num_files = 0
 	};
 
 	if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START && cur_header->magic != FS_START_CLEAN)
 		return ret;
 
-	char *filename = (char *) cur_header + sizeof(struct fs_rec_header);
-	// if mount creates a dummy header, do not count it as a file (it is empty)
-	if (cur_header->status == STATUS_COMMITTED && (cur_header->magic != FS_START || strlen(filename) != 0))
-		ret.num_files++;
-
 	while (1) {
-		if (cur_header->status == STATUS_WEAR_MARKER)
-			ret.wear_marker = cur_header;
-		struct fs_rec_header *next_header = process_advance_header(cur_header, partition_size);
-		if (!next_header)
-			break;
-		cur_header = next_header;
-		if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START && cur_header->magic != FS_START_CLEAN)
-			break;
-
-		// the dummy start header does not count
+		// if mount creates a dummy header, do not count it as a file (it is empty)
 		char *filename = (char *) cur_header + sizeof(struct fs_rec_header);
 		if (cur_header->status == STATUS_COMMITTED && (cur_header->magic != FS_START || strlen(filename) != 0))
 			ret.num_files++;
+
+		if (cur_header->status == STATUS_WEAR_MARKER)
+			ret.wear_marker = cur_header;
+		if (cur_header->status == STATUS_WRAP_MARKER)
+			ret.wrap_marker = cur_header;
+		if (cur_header->status == STATUS_MIGRATING)
+			ret.migrating = cur_header;
+		if (cur_header->status == STATUS_RESERVED)
+			ret.reserved = cur_header;
+
+		struct fs_rec_header *next_header = process_advance_header(cur_header, partition_size);
+		if (!next_header)
+			break;
+
+		cur_header = next_header;
+		if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START && cur_header->magic != FS_START_CLEAN)
+			break;
 	}
 	ret.last_header = cur_header;
 	return ret;
@@ -139,22 +147,16 @@ uint32_t change_file_magic(struct fs_rec_header *file_header, uint16_t magic) {
 	return 0;
 }
 
-uint32_t calculate_free_space() {
+// uint32_t calculate_free_space() {
+// 	uint32_t partition_size = flash_get_total_size();
+// 	uint32_t actual_head = ALIGN_DOWN(fs_head);
+// 	if (fs_tail > actual_head)
+// 		return partition_size - (fs_tail - actual_head);
+// 	return actual_head - fs_tail;
+// }
+
+uint32_t check_free_space(uint32_t write_offset, uint32_t filename_len, uint32_t len) {
 	uint32_t partition_size = flash_get_total_size();
-	uint32_t actual_head = ALIGN_DOWN(fs_head);
-	if (fs_tail > actual_head)
-		return partition_size - (fs_tail - actual_head);
-	return actual_head - fs_tail;
-}
-
-// current_offset is updated with the new offset, provide pointer to UINT32_MAX if only creating
-uint32_t append_file(const char *filename, uint32_t *current_offset, void *buffer, uint32_t len,
-					uint8_t want_status, bool add_wear_marker) {
-
-	uint32_t filename_len = strlen(filename);
-
-	uint32_t partition_size = flash_get_total_size();
-	uint32_t tail_offset = fs_tail;
 
 	// free space guarantee
 	// check if: if we were to add this file (directly or with wear marker)
@@ -186,7 +188,7 @@ uint32_t append_file(const char *filename, uint32_t *current_offset, void *buffe
 	// or if one is needed in case we add the current file, and copy
 	// the largest file twiec
 	bool log_wrap = fs_head >= fs_tail;
-	uint32_t current_position = tail_offset;
+	uint32_t current_position = write_offset;
 	if (new_file_total + wrap_marker_total > partition_size - current_position) {
 		if (log_wrap)
 			return FS_ENOSPC;
@@ -216,12 +218,31 @@ uint32_t append_file(const char *filename, uint32_t *current_offset, void *buffe
 		// tail must be in front of head
 		if (log_wrap && current_position >= fs_head)
 			return FS_ENOSPC;
-
-		// if no wrapped log, 
 	}
 
 	// if no wrap, there is no problem since we still have free space
 	// after tail and before the end of partition
+
+	return FS_SUCCESS;
+}
+
+// current_offset is updated with the new offset, provide pointer to UINT32_MAX if only creating
+// updates fs_tail
+uint32_t append_file(const char *filename, uint32_t *current_offset, void *buffer, uint32_t len,
+					uint8_t want_status, bool add_wear_marker) {
+
+	uint32_t filename_len = strlen(filename);
+
+	uint32_t partition_size = flash_get_total_size();
+
+	if (check_free_space(fs_tail, filename_len, len))
+		return FS_ENOSPC;
+
+	uint32_t new_file_total = sizeof(struct fs_rec_header) + filename_len + 1 + len;
+	new_file_total = ALIGN_UP(new_file_total);
+
+	uint32_t wrap_marker_total = sizeof(struct fs_rec_header) + 1;
+	wrap_marker_total = ALIGN_UP(wrap_marker_total);
 
 	// mark old file as migrating
 	if (*current_offset != UINT32_MAX) {
@@ -229,18 +250,18 @@ uint32_t append_file(const char *filename, uint32_t *current_offset, void *buffe
 		change_file_status(old_header, STATUS_MIGRATING);
 	}
 
-	uint32_t new_file_offset = tail_offset;
+	uint32_t new_file_offset = fs_tail;
 	// ensure we have space for a wrap marker afterwards
-	if (new_file_total + wrap_marker_total > partition_size - tail_offset) {
+	if (new_file_total + wrap_marker_total > partition_size - fs_tail) {
 		struct fs_rec_header wrap_marker = {
 			.magic = FS_RECORD,
 			.status = STATUS_WRAP_MARKER,
 			.data_len = 0
 		};
 		char empty = 0;
-		if (flash_write(flash_mmap, &wrap_marker, tail_offset, sizeof(struct fs_rec_header)))
+		if (flash_write(flash_mmap, &wrap_marker, fs_tail, sizeof(struct fs_rec_header)))
 			return FS_EFLASH;
-		if (flash_write(flash_mmap, &empty, tail_offset + sizeof(struct fs_rec_header), 1))
+		if (flash_write(flash_mmap, &empty, fs_tail + sizeof(struct fs_rec_header), 1))
 			return FS_EFLASH;
 		new_file_offset = 0;
 	}
@@ -428,12 +449,12 @@ uint32_t wear_level_compact(struct fs_rec_header *wear_marker, uint32_t num_file
 		// and maybe an FS_START, depending on whether the current file's header is erased
 
 
-		if (count == 1) {
-			printf("CRASH\n");
-			printf("0x%lx\n", (uint64_t) cur_header - (uint64_t) flash_mmap);
-			printf("0x%lx\n", (uint64_t) next_header - (uint64_t) flash_mmap);
-			exit(1);
-		}
+		// if (count == 1) {
+		// 	printf("CRASH\n");
+		// 	printf("0x%lx\n", (uint64_t) cur_header - (uint64_t) flash_mmap);
+		// 	printf("0x%lx\n", (uint64_t) next_header - (uint64_t) flash_mmap);
+		// 	exit(1);
+		// }
 
 		// done with processing the current file
 		// now advance FS_START and delete the just-moved file
@@ -457,6 +478,28 @@ uint32_t wear_level_compact(struct fs_rec_header *wear_marker, uint32_t num_file
 	}
 
 	return FS_SUCCESS;
+}
+
+struct fs_rec_header *find_file_name(const char *name) {
+	uint32_t filename_len = strlen(name);
+	uint32_t partition_size = flash_get_total_size();
+
+	struct fs_rec_header *cur_header = (struct fs_rec_header *) (flash_mmap + fs_head);
+	while (1) {
+		if (cur_header->status == STATUS_COMMITTED) {
+			char *cur_filename = (char *) cur_header + sizeof(struct fs_rec_header);
+			if (strlen(cur_filename) == filename_len && strncmp(cur_filename, name, filename_len) == 0)
+				return cur_header;
+		}
+
+		struct fs_rec_header *next_header = process_advance_header(cur_header, partition_size);
+		if (!next_header)
+			break;
+		cur_header = next_header;
+		if (cur_header->magic != FS_RECORD)
+			break;
+	}
+	return NULL;
 }
 
 uint32_t lfs_mount() {
@@ -491,6 +534,7 @@ uint32_t lfs_mount() {
 			.status = STATUS_COMMITTED,
 			.data_len = 0
 		};
+
 		char empty = 0;
 		// write record and empty filename
 		if (flash_write(flash_mmap, &new_header, 0, sizeof(struct fs_rec_header)))
@@ -501,96 +545,163 @@ uint32_t lfs_mount() {
 		fs_head = 0;
 		fs_tail = sizeof(struct fs_rec_header) + 1;
 		fs_tail = ALIGN_UP(fs_tail);
+
+		printf("head = 0x%lx\n", (uint64_t) fs_head);
+		printf("tail = 0x%lx\n", (uint64_t) fs_tail);
+
+		return FS_SUCCESS;
+	}
+
+	// first, check for crash
+
+	// there are multiple cases of crash during wear leveling
+	// if the file processed during the crash is across multiple erase sectors,
+	// and erase_file erased the header of that file:
+	//   1. first record is FS_START_CLEAN, no FS_START
+	// else (if the file is in only one erase sector, or crash before the record is erased)
+	//   2. first record is FS_START, second record is FS_START
+	//      in this case, the first file has already been cleaned up
+	//      we can simply set the first record magic to 00, and done
+	//   3. first record is FS_START, second record is FS_START_CLEAN
+	//      do not know that we are done cleaning up the first file
+	//      we clean up the first file, set the second record to FS_START
+	//     a nd set the first record to 00
+
+	// 1. if the first is FS_START_CLEAN
+	if (cur_header->magic == FS_START_CLEAN) {
+		if (change_file_magic(cur_header, FS_START))
+			return FS_EFLASH;
 	}
 	else {
-		// first, check for crashes
+		struct fs_rec_header *next_header = process_advance_header(cur_header, partition_size);
+		if (next_header) {
+			// 2. crash after the file has been cleaned up, simply delete the old file
+			if (next_header->magic == FS_START) {
+				if (change_file_magic(cur_header, 0))
+					return FS_EFLASH;
+				cur_header = next_header;
+			}
+			// 3. complicated
+			if (next_header->magic == FS_START_CLEAN) {
+				uint32_t cur_offset = (uint64_t) cur_header - (uint64_t) flash_mmap;
+				uint32_t next_offset = (uint64_t) next_header - (uint64_t) flash_mmap;
 
-		// there are multiple cases of crash during wear leveling
-		// if the file processed during the crash is across multiple erase sectors,
-		// and erase_file erased the header of that file:
-		//   1. first record is FS_START_CLEAN, no FS_START
-		// else (if the file is in only one erase sector, or crash before the record is erased)
-		//   2. first record is FS_START, second record is FS_START
-		//      in this case, the first file has already been cleaned up
-		//      we can simply set the first record magic to 00, and done
-		//   3. first record is FS_START, second record is FS_START_CLEAN
-		//      do not know that we are done cleaning up the first file
-		//      we clean up the first file, set the second record to FS_START
-		//     a nd set the first record to 00
+				// we cannot have any magic numbers in 32 byte boundaries, or they will be detected as files
+				uint32_t code = clobber_file_data(cur_header);
+				if (code != FS_SUCCESS)
+					return code;
 
-		// 1. if the first is FS_START_CLEAN
-		if (cur_header->magic == FS_START_CLEAN) {
-			if (change_file_magic(cur_header, FS_START))
+				// if the file crosses a flash boundary, or we are wrapping
+				uint32_t sector_size = flash_get_sector_size();
+				if (next_offset / sector_size != cur_offset / sector_size) {
+					// if next_offset is 0, then we are processing a wrap marker
+					// the wrap marker does not actually cross the flash erase boundar
+					// we can simply erase all of the last sector
+					code = erase_file(cur_offset, next_offset == 0 ? flash_get_total_size() : next_offset);
+					if (code != FS_SUCCESS)
+						return code;
+				}
+
+				// done with processing the current file
+				// now advance FS_START and delete the just-moved file
+				if (change_file_magic(next_header, FS_START))
+					return FS_EFLASH;
+
+				// do not set magic to 0 if the sector has been erased
+				if (next_offset / sector_size == cur_offset / sector_size) {
+					if (change_file_magic(cur_header, 0))
+						return FS_EFLASH;
+				}
+
+				cur_header = next_header;
+			}
+		}
+	}
+
+	fs_head = (uint64_t) cur_header - (uint64_t) flash_mmap;
+
+	// scan until no more files -- set that to tail pointer
+	struct scan_headers_result scan_result = scan_headers(cur_header, partition_size);
+	cur_header = scan_result.last_header;
+	num_files += scan_result.num_files;
+	if (scan_result.wear_marker)
+		wear_marker = scan_result.wear_marker;
+
+	fs_tail = (uint64_t) cur_header - (uint64_t) flash_mmap;
+	
+
+	// TODO: consider whether to wear level before recovery
+	// in case we need the extra space to append a migrating file
+
+	// found migrating, found reserved
+	if (scan_result.migrating && scan_result.reserved) {
+		// make the old file the active/committed file
+		// we can do this by copying the content of the migrating file to reserved
+		// but we don't know if we can (cannot change bits from 0 to 1)
+
+		struct fs_rec_header *migrating = scan_result.migrating;
+		struct fs_rec_header *reserved = scan_result.reserved;
+
+		uint32_t reserved_offset = (uint64_t) reserved - (uint64_t) flash_mmap;
+		char *filename = (char *) migrating + sizeof(struct fs_rec_header);
+
+		// we do not know the size of the file the user was trying to write before the crash
+		// so we first verify if the migrating file can even be stored in reserved without
+		// failing the free space guarantee
+		if (check_free_space(reserved_offset, strlen(filename), migrating->data_len))
+			return FS_ENOSPC;
+
+		bool can_write = FLASH_CAN_WRITE(migrating->data_len, reserved->data_len);
+
+		uint32_t total_size = strlen(filename) + 1 + migrating->data_len;
+		uint8_t *migrating_ptr = (uint8_t *) filename;
+		uint8_t *reserved_ptr = (uint8_t *) reserved + sizeof(struct fs_rec_header);
+
+		for (uint32_t i = 0; i < total_size && can_write; i++) {
+			if (!FLASH_CAN_WRITE(migrating_ptr[i], reserved_ptr[i]))
+				can_write = false;
+		}
+
+		if (can_write) {
+			if (flash_write(flash_mmap, migrating_ptr, reserved_offset + sizeof(struct fs_rec_header), total_size))
 				return FS_EFLASH;
 		}
 		else {
-			struct fs_rec_header *next_header = process_advance_header(cur_header, partition_size);
-			if (next_header) {
-				// 2. crash after the file has been cleaned up, simply delete the old file
-				if (next_header->magic == FS_START) {
-					if (change_file_magic(cur_header, 0))
-						return FS_EFLASH;
-					cur_header = next_header;
-				}
-				// 3. complicated
-				if (next_header->magic == FS_START_CLEAN) {
-					uint32_t cur_offset = (uint64_t) cur_header - (uint64_t) flash_mmap;
-					uint32_t next_offset = (uint64_t) next_header - (uint64_t) flash_mmap;
+			if (change_file_status(reserved, STATUS_DELETED))
+				return FS_EFLASH;
 
-					// we cannot have any magic numbers in 32 byte boundaries, or they will be detected as files
-					uint32_t code = clobber_file_data(cur_header);
-					if (code != FS_SUCCESS)
-						return code;
+			uint32_t migrating_offset = (uint64_t) migrating - (uint64_t) flash_mmap;
+			uint32_t code = append_file(filename, &migrating_offset, filename + strlen(filename) + 1,
+							   migrating->data_len, STATUS_COMMITTED, false);
 
-					// if the file crosses a flash boundary, or we are wrapping
-					uint32_t sector_size = flash_get_sector_size();
-					if (next_offset / sector_size != cur_offset / sector_size) {
-						// if next_offset is 0, then we are processing a wrap marker
-						// the wrap marker does not actually cross the flash erase boundar
-						// we can simply erase all of the last sector
-						code = erase_file(cur_offset, next_offset == 0 ? flash_get_total_size() : next_offset);
-						if (code != FS_SUCCESS)
-							return code;
-					}
+			if (code != FS_SUCCESS)
+				return code;
+		}
+	}
 
-					// done with processing the current file
-					// now advance FS_START and delete the just-moved file
-					if (change_file_magic(next_header, FS_START))
-						return FS_EFLASH;
+	// found migrating, no reserved: there may or may not be a commited file of the same name
+	// possible there is a committed file of the same name since we commit file before delete migrating
+	else if (scan_result.migrating && !scan_result.reserved) {
+		char *filename = (char *) scan_result.migrating + sizeof(struct fs_rec_header);
+		struct fs_rec_header *found_file = find_file_name(filename);
 
-					// do not set magic to 0 if the sector has been erased
-					if (next_offset / sector_size == cur_offset / sector_size) {
-						if (change_file_magic(cur_header, 0))
-							return FS_EFLASH;
-					}
+		// if we find a committed file of the same name, there is no need to do anything
+		// append file crashed right before setting the migrating file to deleted, complete this
 
-					cur_header = next_header;
-				}
-			}
+		if (!found_file) {
+			// there is no committed file of the same name
+			// append a file with the same contents
+
+			uint32_t migrating_offset = (uint64_t) scan_result.migrating - (uint64_t) flash_mmap;
+			uint32_t code = append_file(filename, &migrating_offset, filename + strlen(filename) + 1,
+							   scan_result.migrating->data_len, STATUS_COMMITTED, false);
+
+			if (code != FS_SUCCESS)
+				return code;
 		}
 
-		fs_head = (uint64_t) cur_header - (uint64_t) flash_mmap;
-
-		// if crash in middle of advancing FS_START for wear leveling, where advancing FS_START to same flash sector
-		// then next header is set to FS_START, but previous has not been set to 0
-		// char *filename = (char *) cur_header + sizeof(struct fs_rec_header);
-		// struct fs_rec_header *next_header = (struct fs_rec_header *) (filename + strlen(filename) + 1 + cur_header->data_len);
-		// next_header = (struct fs_rec_header *) ALIGN_UP((uint64_t) next_header);
-		// if (next_header->magic == FS_START) {
-		// 	printf("crash detected, wear level, same sector\n");
-		// 	change_file_magic(cur_header, 0x0000);
-		// 	cur_header = next_header;
-		// 	fs_head = (uint64_t) cur_header - (uint64_t) flash_mmap;
-		// }
-
-		// scan until no more files -- set that to tail pointer
-		struct scan_headers_result scan_result = scan_headers(cur_header, partition_size);
-		cur_header = scan_result.last_header;
-		num_files += scan_result.num_files;
-		if (scan_result.wear_marker)
-			wear_marker = scan_result.wear_marker;
-
-		fs_tail = (uint64_t) cur_header - (uint64_t) flash_mmap;
+		if (change_file_status(scan_result.migrating, STATUS_DELETED))
+			return FS_EFLASH;
 	}
 
 	printf("head = 0x%lx\n", (uint64_t) fs_head);
@@ -656,26 +767,7 @@ uint32_t vfs_open(const char *name, int flags) {
 	if (filename_len > FS_MAX_FILENAME_LEN)
 		return -1;
 
-	uint32_t partition_size = flash_get_total_size();
-
-	bool file_found = false;
-	struct fs_rec_header *cur_header = (struct fs_rec_header *) (flash_mmap + fs_head);
-	while (1) {
-		if (cur_header->status == STATUS_COMMITTED) {
-			char *cur_filename = (char *) cur_header + sizeof(struct fs_rec_header);
-			if (strlen(cur_filename) == filename_len && strncmp(cur_filename, name, filename_len) == 0) {
-				file_found = true;
-				break;
-			}
-		}
-
-		struct fs_rec_header *next_header = process_advance_header(cur_header, partition_size);
-		if (!next_header)
-			break;
-		cur_header = next_header;
-		if (cur_header->magic != FS_RECORD)
-			break;
-	}
+	struct fs_rec_header *file_found = find_file_name(name);
 
 	struct fs_file_descriptor fd = {
 		.in_use = true,
@@ -688,10 +780,10 @@ uint32_t vfs_open(const char *name, int flags) {
 		uint32_t code = append_file(name, &fd.offset, NULL, 0, STATUS_COMMITTED, true);
 		if (code != FS_SUCCESS)
 			return -1;
-		cur_header = (struct fs_rec_header *) (flash_mmap + fd.offset);
+		file_found = (struct fs_rec_header *) (flash_mmap + fd.offset);
 	}
 
-	fd.offset = (uint64_t) cur_header - (uint64_t) flash_mmap;
+	fd.offset = (uint64_t) file_found - (uint64_t) flash_mmap;
 
 	uint32_t fd_index = fd_list_add(fd);
 	return fd_index == UINT32_MAX ? 0 : fd_index + 1;
