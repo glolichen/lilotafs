@@ -155,7 +155,7 @@ uint32_t change_file_magic(struct fs_rec_header *file_header, uint16_t magic) {
 // 	return actual_head - fs_tail;
 // }
 
-uint32_t check_free_space(uint32_t write_offset, uint32_t filename_len, uint32_t len) {
+uint32_t check_free_space(uint32_t current_offset, uint32_t write_offset, uint32_t filename_len, uint32_t len) {
 	uint32_t partition_size = flash_get_total_size();
 
 	// free space guarantee
@@ -171,7 +171,28 @@ uint32_t check_free_space(uint32_t write_offset, uint32_t filename_len, uint32_t
 	// the free space before and after the files can become fragmented
 	// so we need to make sure BOTH of the areas, should they form that way,
 	// can store the largest file
+	//
+	// in case we lose power / crash while writing the file, and the new content
+	// is incompatible to the old content (i.e. new -> old requires changing 0 -> 1)
+	// it is possible to end up with a situation where it is impossible to write
+	// the old file back, since that would run out of space
+	//
+	// in total, we need to check there is space for
+	// the old file (if we are modifying), the new file, and the largest file twice
 	
+	uint32_t old_file_total;
+	if (current_offset == UINT32_MAX)
+		old_file_total = 0;
+	else {
+		struct fs_rec_header *old_file = (struct fs_rec_header *) (flash_mmap + current_offset);
+
+		// the old and new file names should really be the same, but checking to be safe
+		uint32_t old_filename_len = strlen((char *) old_file + sizeof(struct fs_rec_header));
+
+		old_file_total = sizeof(struct fs_rec_header) + old_filename_len + 1 + old_file->data_len;
+		old_file_total = ALIGN_UP(old_file_total);
+	}
+
 	uint32_t new_file_total = sizeof(struct fs_rec_header) + filename_len + 1 + len;
 	new_file_total = ALIGN_UP(new_file_total);
 
@@ -181,7 +202,7 @@ uint32_t check_free_space(uint32_t write_offset, uint32_t filename_len, uint32_t
 	uint32_t largest_file_total = sizeof(struct fs_rec_header) + largest_filename_len + 1 + largest_file_size;
 	largest_file_total = ALIGN_UP(largest_file_total);
 	// the current file we're writing might be larger than current largest
-	largest_file_total = u32_max(largest_file_total, new_file_total);
+	largest_file_total = u32_max(largest_file_total, u32_max(new_file_total, old_file_total));
 
 	// hypothetical tail pointer if we added this file
 	// log_wrap indicates whether there is already a wear marker,
@@ -196,6 +217,16 @@ uint32_t check_free_space(uint32_t write_offset, uint32_t filename_len, uint32_t
 		current_position = 0;
 	}
 	current_position += new_file_total;
+	current_position = ALIGN_UP(current_position);
+
+	// check if we can write the old file
+	if (old_file_total + wrap_marker_total > partition_size - current_position) {
+		if (log_wrap)
+			return FS_ENOSPC;
+		log_wrap = true;
+		current_position = 0;
+	}
+	current_position += old_file_total;
 	current_position = ALIGN_UP(current_position);
 
 	// now we try to add the largerst file, twice
@@ -235,7 +266,7 @@ uint32_t append_file(const char *filename, uint32_t *current_offset, void *buffe
 
 	uint32_t partition_size = flash_get_total_size();
 
-	if (check_free_space(fs_tail, filename_len, len))
+	if (check_free_space(*current_offset, fs_tail, filename_len, len))
 		return FS_ENOSPC;
 
 	uint32_t new_file_total = sizeof(struct fs_rec_header) + filename_len + 1 + len;
@@ -644,12 +675,6 @@ uint32_t lfs_mount() {
 
 		uint32_t reserved_offset = (uint64_t) reserved - (uint64_t) flash_mmap;
 		char *filename = (char *) migrating + sizeof(struct fs_rec_header);
-
-		// we do not know the size of the file the user was trying to write before the crash
-		// so we first verify if the migrating file can even be stored in reserved without
-		// failing the free space guarantee
-		if (check_free_space(reserved_offset, strlen(filename), migrating->data_len))
-			return FS_ENOSPC;
 
 		bool can_write = FLASH_CAN_WRITE(migrating->data_len, reserved->data_len);
 
