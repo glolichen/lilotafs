@@ -909,8 +909,9 @@ uint32_t lfs_unmount() {
 	has_wear_marker = false;
 
 	// close all open FDs
+	if (fd_list_capacity != 0 && fd_list != NULL)
+		free(fd_list);
 	fd_list_size = 0, fd_list_capacity = 0;
-	free(fd_list);
 
 	munmap(flash_mmap, flash_get_total_size());
 

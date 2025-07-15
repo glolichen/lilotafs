@@ -25,7 +25,7 @@ torture: $(OBJ) torture.o
 	$(CC) -c -o $@ $< $(CFLAGS)
 
 new_disk:
-	dd if=/dev/zero bs=$(TOTAL_SIZE) count=1 | tr '\000' '\377' > disk.bin
+	@dd if=/dev/zero bs=$(TOTAL_SIZE) count=1 | tr '\000' '\377' > disk.bin
 
 clean:
 	# rm test gen_test_disk torture *.o

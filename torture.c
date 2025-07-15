@@ -8,17 +8,13 @@
 
 #include "lilotaFS.h"
 
-#define FILE_COUNT 23
-#define OP_COUNT 200
+#define FILE_COUNT 80
+#define OP_COUNT 1000
 
-#define MIN_SIZE 200
-#define MAX_SIZE 14000
+#define MIN_SIZE 0
+#define MAX_SIZE 10000
 
-// #define FILE_COUNT 1
-// #define OP_COUNT 1000
-//
-// #define MIN_SIZE 50
-// #define MAX_SIZE 5000
+#define OPS_PER_REMOUNT 200
 
 struct table_entry {
 	char *filename;
@@ -30,6 +26,7 @@ uint32_t random_number(uint32_t min, uint32_t max) {
 }
 
 uint32_t inspect_fs(struct table_entry *files) {
+	printf("========== INSPECT ==========\n");
 	uint32_t wrong_count = 0;
 	for (uint32_t i = 0; i < FILE_COUNT; i++) {
 		struct table_entry entry = files[i];
@@ -79,6 +76,8 @@ uint32_t inspect_fs(struct table_entry *files) {
 	if (file_count != FILE_COUNT)
 		printf("# of files wrong: LFS reports %u\n", file_count);
 
+	printf("========== INSPECT OVER ==========\n");
+
 	return wrong_count;
 }
 
@@ -93,13 +92,14 @@ int main(int argc, char *argv[]) {
 	char *disk_name = argv[1];
 	int disk = open(disk_name, O_RDWR);
 
+	uint64_t seed;
 	if (argc == 3)
-		srand(strtoul(argv[2], NULL, 0));
-	else {
-		time_t cur_time = time(NULL);
-		printf("%ld\n", cur_time);
-		srand(cur_time);
-	}
+		seed = strtoul(argv[2], NULL, 0);
+	else
+		seed = time(NULL);
+
+	printf("random seed: %ld\n", seed);
+	srand(seed);
 
 	lfs_set_file(disk);
 
@@ -124,6 +124,7 @@ int main(int argc, char *argv[]) {
 		printf("file %u = %.63s\n", file, entry.filename);
 	}
 
+	uint32_t total_wrong = 0, error_code = 0;
 	for (uint32_t op = 0; op < OP_COUNT; op++) {
 		uint32_t file = random_number(0, FILE_COUNT - 1);
 		uint32_t size = random_number(MIN_SIZE, MAX_SIZE);
@@ -132,18 +133,63 @@ int main(int argc, char *argv[]) {
 			random[i] = random_number(0, 255);
 
 		uint32_t code = vfs_write(fds[file], random, size);
-		if (code) {
+		if (code == FS_SUCCESS) {
+			struct table_entry *entry = &files[file];
+			if (entry->content)
+				free(entry->content);
+			entry->content = random;
+		}
+
+		if (code != FS_SUCCESS && code != FS_ENOSPC) {
+			free(random);
 			printf("write error: %u\n", code);
+			error_code = code;
 			goto cleanup;
 		}
 
-		struct table_entry *entry = &files[file];
-		if (entry->content)
-			free(entry->content);
-		entry->content = random;
+		if (code == FS_ENOSPC || (op % OPS_PER_REMOUNT == 0 && op != 0)) {
+			printf("\n\n=============== UNMOUNT/REMOUNT ===============\n");
+			if (code == FS_SUCCESS) {
+				uint32_t wrong = inspect_fs(files);
+				total_wrong += wrong;
+				if (wrong != 0) {
+					;
+				}
+				printf("before unmount inspect: %u\n", wrong);
+			}
+			else
+				printf("out of space!\n");
+
+			printf("\nunmount: %u\n", lfs_unmount());
+			lfs_set_file(disk);
+			uint32_t mount_code = lfs_mount();
+			if (mount_code != FS_SUCCESS) {
+				free(random);
+				printf("mount error: %u\n", code);
+				error_code = code;
+				goto cleanup;
+			}
+
+			for (uint32_t file = 0; file < FILE_COUNT; file++) {
+				struct table_entry entry = files[file];
+				fds[file] = vfs_open(entry.filename, FS_WRITABLE | FS_READABLE | FS_CREATE);
+			}
+
+			uint32_t wrong = inspect_fs(files);
+			total_wrong += wrong;
+			if (wrong != 0) {
+				;
+			}
+			printf("after unmount inspect: %u\n", wrong);
+			printf("=============== UNMOUNT/REMOUNT OVER ===============\n\n");
+		}
 	}
 
-	printf("%u\n", inspect_fs(files));
+	if (error_code == 0) {
+		uint32_t wrong = inspect_fs(files);
+		total_wrong += wrong;
+		printf("final inspect: %u\n", wrong);
+	}
 
 cleanup:
 	for (uint32_t i = 0; i < FILE_COUNT; i++) {
@@ -153,6 +199,15 @@ cleanup:
 
 	lfs_unmount();
 
-	return 0;
+	if (total_wrong == 0 && error_code == 0)
+		return 0;
+
+	if (error_code == 0) {
+		fprintf(stderr, "\nseed %ld, wrong %u\n", seed, total_wrong);
+		return total_wrong == 0 ? 0 : 1;
+	}
+
+	fprintf(stderr, "\nseed %ld, wrong %u\n", seed, error_code);
+	return error_code ? 0 : 1;
 }
 
