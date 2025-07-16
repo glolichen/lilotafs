@@ -56,8 +56,8 @@ struct fs_file_descriptor {
 };
 
 uint32_t lfs_set_file(int fd);
-uint32_t lfs_mount();
 uint32_t lfs_unmount();
+uint32_t lfs_mount();
 
 uint32_t vfs_open(const char *name, int flags);
 uint32_t vfs_close(uint32_t fd);

@@ -1,11 +1,22 @@
+#include <setjmp.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 
+#include "util.h"
 #include "flash.h"
+#include "lilotaFS.h"
 
-#define FREE_RETURN(mem, val) { free(mem); return val; }
+jmp_buf lfs_mount_jmp_buf;
+
+uint32_t write_moves_remaining = UINT32_MAX;
+uint32_t erase_moves_remaining = UINT32_MAX;
+
+void flash_set_crash(uint32_t write_min, uint32_t write_max, uint32_t erase_min, uint32_t erase_max) {
+	write_moves_remaining = RANDOM_NUMBER(write_min, write_max);
+	erase_moves_remaining = RANDOM_NUMBER(erase_min, erase_max);
+}
 
 uint32_t flash_get_total_size() {
 	return TOTAL_SIZE;
@@ -34,7 +45,21 @@ int flash_write(uint8_t *mmap, const void *buffer, uint32_t address, uint32_t le
 		}
 	}
 
+#ifdef CRASH_INJECT
+	for (uint32_t i = 0; i < length; i++) {
+		if (write_moves_remaining-- == 0) {
+			printf("WRITE CRASH\n");
+			printf("call: write len %u to address 0x%x\n", length, address);
+			printf("crash before writing 0x%x to 0x%x\n", write[i], address + i);
+			if (i >= 1)
+				printf("successfully wrote [%x %x] to 0x%x\n", write[i - 2], write[i - 1], address + i - 2);
+			longjmp(lfs_mount_jmp_buf, 1);
+		}
+		*(mmap + address + i) = write[i];
+	}
+#else
 	memcpy(mmap + address, buffer, length);
+#endif
 
 	return FLASH_OK;
 }
@@ -47,7 +72,15 @@ int flash_erase_region(uint8_t *mmap, uint32_t start, uint32_t len) {
 	if (start > total_size || start + len > total_size)
 		return FLASH_OUT_OF_BOUNDS;
 
+#ifdef CRASH_INJECT
+	for (uint32_t i = 0; i < len; i++) {
+		if (erase_moves_remaining-- == 0)
+			longjmp(lfs_mount_jmp_buf, 1);
+		*(mmap + start + i) = 0xFF;
+	}
+#else
 	memset(mmap + start, 0xFF, len);
+#endif
 
 	return FLASH_OK;
 }

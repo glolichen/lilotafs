@@ -6,24 +6,14 @@
 #include <stdlib.h>
 #include <fcntl.h>
 
+#include "util.h"
+#include "flash.h"
 #include "lilotaFS.h"
-
-#define FILE_COUNT 80
-#define OP_COUNT 1000
-
-#define MIN_SIZE 0
-#define MAX_SIZE 10000
-
-#define OPS_PER_REMOUNT 200
 
 struct table_entry {
 	char *filename;
 	uint8_t *content;
 };
-
-uint32_t random_number(uint32_t min, uint32_t max) {
-	return rand() % (max - min + 1) + min;
-}
 
 uint32_t inspect_fs(struct table_entry *files) {
 	printf("========== INSPECT ==========\n");
@@ -102,6 +92,7 @@ int main(int argc, char *argv[]) {
 	srand(seed);
 
 	lfs_set_file(disk);
+	flash_set_crash(CRASH_WRITE_MIN_MOVES, CRASH_WRITE_MAX_MOVES, CRASH_ERASE_MIN_MOVES, CRASH_ERASE_MAX_MOVES);
 
 	printf("mount: %u\n", lfs_mount());
 
@@ -109,14 +100,14 @@ int main(int argc, char *argv[]) {
 	uint32_t fds[FILE_COUNT];
 
 	for (uint32_t file = 0; file < FILE_COUNT; file++) {
-		uint32_t filename_len = random_number(10, 63);
+		uint32_t filename_len = RANDOM_NUMBER(10, 63);
 
 		struct table_entry entry = {
 			.filename = (char *) calloc(filename_len + 1, sizeof(char)),
 			.content = NULL
 		};
 		for (uint32_t i = 0; i < filename_len; i++)
-			entry.filename[i] = random_number(33, 126);
+			entry.filename[i] = RANDOM_NUMBER(33, 126);
 		files[file] = entry;
 
 		fds[file] = vfs_open(entry.filename, FS_WRITABLE | FS_READABLE | FS_CREATE);
@@ -126,11 +117,11 @@ int main(int argc, char *argv[]) {
 
 	uint32_t total_wrong = 0, error_code = 0;
 	for (uint32_t op = 0; op < OP_COUNT; op++) {
-		uint32_t file = random_number(0, FILE_COUNT - 1);
-		uint32_t size = random_number(MIN_SIZE, MAX_SIZE);
+		uint32_t file = RANDOM_NUMBER(0, FILE_COUNT - 1);
+		uint32_t size = RANDOM_NUMBER(MIN_SIZE, MAX_SIZE);
 		uint8_t *random = (uint8_t *) malloc(size);
 		for (uint32_t i = 0; i < size; i++)
-			random[i] = random_number(0, 255);
+			random[i] = RANDOM_NUMBER(0, 255);
 
 		uint32_t code = vfs_write(fds[file], random, size);
 		if (code == FS_SUCCESS) {
@@ -202,12 +193,15 @@ cleanup:
 	if (total_wrong == 0 && error_code == 0)
 		return 0;
 
+	if (total_wrong == 0 && error_code == FS_ENOSPC)
+		return 0;
+
 	if (error_code == 0) {
 		fprintf(stderr, "\nseed %ld, wrong %u\n", seed, total_wrong);
 		return total_wrong == 0 ? 0 : 1;
 	}
 
-	fprintf(stderr, "\nseed %ld, wrong %u\n", seed, error_code);
+	fprintf(stderr, "\nseed %ld, error code %u\n", seed, error_code);
 	return error_code ? 0 : 1;
 }
 

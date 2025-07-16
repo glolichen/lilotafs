@@ -9,11 +9,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "util.h"
 #include "lilotaFS.h"
-
-uint32_t random_number(uint32_t min, uint32_t max) {
-	return ((double) rand() / RAND_MAX) * (max - min) + min;
-}
 
 // NOTE: testing utility commands:
 // W [fd] [length]        | write random data of length [length] to file [fd]
@@ -122,7 +119,7 @@ int main(int argc, char *argv[]) {
 			uint32_t size = flag;
 			uint8_t *data = (uint8_t *) malloc(size);
 			for (uint32_t i = 0; i < size; i++)
-				data[i] = mode == 'W' ? random_number(0, 255) : 0xFF;
+				data[i] = mode == 'W' ? RANDOM_NUMBER(0, 255) : 0xFF;
 			uint32_t result = vfs_write(fd, data, size);
 			printf("write %u bytes to fd %u: %u\n", size, fd, result);
 			free(data);

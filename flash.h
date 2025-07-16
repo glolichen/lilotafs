@@ -9,6 +9,8 @@
 #define FLASH_MALLOC_ERROR 102
 #define FLASH_OUT_OF_BOUNDS 103
 
+void flash_set_crash(uint32_t write_min, uint32_t write_max, uint32_t erase_min, uint32_t erase_max);
+
 uint32_t flash_get_total_size();
 uint32_t flash_get_sector_size();
 

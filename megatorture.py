@@ -10,6 +10,8 @@ def main():
         seed = random.randrange(0, 1 << 31)
         os.system("make new_disk > /dev/null 2> /dev/null")
         code = os.system(f"./torture disk.bin {seed} > /dev/null")
+        if code != 0:
+            print(f"problem {seed}")
 
         if i % PRINT_EVERY == PRINT_EVERY - 1:
             print("\b" * len(text), end="", flush=True)

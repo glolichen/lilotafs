@@ -2,19 +2,26 @@
 
 #include <bits/pthreadtypes.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <setjmp.h>
 #include <sys/mman.h>
 #include <sys/types.h>
 
 #include "flash.h"
+
+extern jmp_buf lfs_mount_jmp_buf;
 
 uint8_t *flash_mmap;
 uint32_t fs_head, fs_tail;
 uint32_t largest_file_size, largest_filename_len;
 
 bool has_wear_marker;
+
+uint32_t fd_list_size = 0, fd_list_capacity = 0;
+struct fs_file_descriptor *fd_list = NULL;
 
 #define FLASH_CAN_WRITE(want, current) (!((current) ^ ((want) | (current))))
 
@@ -124,26 +131,37 @@ struct scan_headers_result {
 	return ret;
 }
 
+uint32_t change_file_magic(struct fs_rec_header *file_header, uint16_t magic) {
+	uint32_t file_offset = (uint64_t) file_header - (uint64_t) flash_mmap;
+	uint32_t magic_addr = file_offset + offsetof(struct fs_rec_header, magic);
+
+	int out = flash_write(flash_mmap, &magic, magic_addr, 2);
+	if (out)
+		return FS_EFLASH;
+
+	file_header->magic = magic;
+	return 0;
+}
 uint32_t change_file_status(struct fs_rec_header *file_header, uint8_t status) {
 	uint32_t file_offset = (uint64_t) file_header - (uint64_t) flash_mmap;
-	uint32_t status_addr = file_offset + ((uint64_t) &file_header->status - (uint64_t) file_header);
+	uint32_t status_addr = file_offset + offsetof(struct fs_rec_header, status);
 
-	file_header->status = status;
 	int out = flash_write(flash_mmap, &status, status_addr, 1);
 	if (out)
 		return FS_EFLASH;
 
+	file_header->status = status;
 	return 0;
 }
-uint32_t change_file_magic(struct fs_rec_header *file_header, uint16_t magic) {
+uint32_t change_file_data_len(struct fs_rec_header *file_header, uint32_t data_len) {
 	uint32_t file_offset = (uint64_t) file_header - (uint64_t) flash_mmap;
-	uint32_t status_addr = file_offset + ((uint64_t) &file_header->magic - (uint64_t) file_header);
+	uint32_t data_len_addr = file_offset + offsetof(struct fs_rec_header, data_len);
 
-	file_header->magic = magic;
-	int out = flash_write(flash_mmap, &magic, status_addr, 1);
+	int out = flash_write(flash_mmap, &data_len, data_len_addr, 4);
 	if (out)
 		return FS_EFLASH;
 
+	file_header->data_len = data_len;
 	return 0;
 }
 
@@ -533,7 +551,32 @@ struct fs_rec_header *find_file_name(const char *name) {
 	return NULL;
 }
 
+// simulate graceful computer shutdown
+uint32_t lfs_unmount() {
+	largest_file_size = 0, largest_filename_len = 0;
+	fs_head = 0, fs_tail = 0;
+	has_wear_marker = false;
+
+	// close all open FDs
+	if (fd_list_capacity != 0 && fd_list != NULL)
+		free(fd_list);
+	fd_list_size = 0, fd_list_capacity = 0;
+
+	munmap(flash_mmap, flash_get_total_size());
+
+	return FS_SUCCESS;
+}
+
+
 uint32_t lfs_mount() {
+	if (setjmp(lfs_mount_jmp_buf)) {
+		// simulated crash will long jump back to here
+		// simulate computer restart by unmounting and remounting
+		printf("SIMULATE CRASH!!!\n");
+		lfs_unmount();
+		exit(1);
+	}
+
 	largest_file_size = 0, largest_filename_len = 0;
 	fs_head = 0, fs_tail = 0;
 	has_wear_marker = false;
@@ -658,8 +701,12 @@ uint32_t lfs_mount() {
 	if (scan_result.wear_marker)
 		wear_marker = scan_result.wear_marker;
 
+	// there is a very weird edge case: if we crash while writing the file name,
+	// the file name string is not terminated, leading to scan_headers detecting
+	// "a file that is too long" (as the string goes on and on)
+	// so if the last header is reserved, fs_tail is not necessarily correct!
+	// we will deal with this later
 	fs_tail = (uint64_t) cur_header - (uint64_t) flash_mmap;
-	
 
 	// TODO: consider whether to wear level before recovery
 	// in case we need the extra space to append a migrating file
@@ -688,20 +735,49 @@ uint32_t lfs_mount() {
 		}
 
 		if (can_write) {
+			printf("HELLO WORLD\n");
+			if (change_file_data_len(reserved, migrating->data_len))
+				return FS_EFLASH;
 			if (flash_write(flash_mmap, migrating_ptr, reserved_offset + sizeof(struct fs_rec_header), total_size))
+				return FS_EFLASH;
+			if (change_file_status(reserved, STATUS_COMMITTED))
+				return FS_EFLASH;
+			if (change_file_status(migrating, STATUS_DELETED))
 				return FS_EFLASH;
 		}
 		else {
+			// if the head is also the reserved file... weird edge case described earlier
+			if (cur_header == reserved) {
+				uint8_t zero = 0;
+				uint32_t terminate_position = fs_tail + sizeof(struct fs_rec_header);
+				terminate_position += strlen(filename);
+
+				if (flash_write(flash_mmap, &zero, terminate_position, 1))
+					return FS_EFLASH;
+				if (change_file_data_len(cur_header, 0))
+					return FS_EFLASH;
+
+				fs_tail = ALIGN_UP(terminate_position + 1);
+			}
+
 			if (change_file_status(reserved, STATUS_DELETED))
 				return FS_EFLASH;
 
 			uint32_t migrating_offset = (uint64_t) migrating - (uint64_t) flash_mmap;
-			uint32_t code = append_file(filename, &migrating_offset, filename + strlen(filename) + 1,
+			uint32_t code = append_file(filename, &migrating_offset, migrating_ptr + strlen(filename) + 1,
 							   migrating->data_len, STATUS_COMMITTED, false);
 
 			if (code != FS_SUCCESS)
 				return code;
 		}
+
+		// check everything again
+		struct fs_rec_header *head_record = (struct fs_rec_header *) (flash_mmap + fs_head);
+		struct scan_headers_result scan_result = scan_headers(head_record, partition_size);
+		fs_tail = (uint64_t) scan_result.last_header - (uint64_t) flash_mmap;
+		num_files = scan_result.num_files;
+		if (scan_result.wear_marker)
+			wear_marker = scan_result.wear_marker;
 	}
 
 	// found migrating, no reserved: there may or may not be a commited file of the same name
@@ -749,9 +825,6 @@ uint32_t lfs_mount() {
 
 
 
-
-uint32_t fd_list_size = 0, fd_list_capacity = 0;
-struct fs_file_descriptor *fd_list = NULL;
 
 uint32_t fd_list_append(struct fs_file_descriptor fd) {
 	if (fd_list_size < fd_list_capacity) {
@@ -901,22 +974,6 @@ uint32_t vfs_delete(uint32_t fd) {
 	return FS_SUCCESS;
 }
 
-
-// simulate graceful computer shutdown
-uint32_t lfs_unmount() {
-	largest_file_size = 0, largest_filename_len = 0;
-	fs_head = 0, fs_tail = 0;
-	has_wear_marker = false;
-
-	// close all open FDs
-	if (fd_list_capacity != 0 && fd_list != NULL)
-		free(fd_list);
-	fd_list_size = 0, fd_list_capacity = 0;
-
-	munmap(flash_mmap, flash_get_total_size());
-
-	return FS_SUCCESS;
-}
 
 uint32_t lfs_count_files() {
 	uint32_t count = 0;
