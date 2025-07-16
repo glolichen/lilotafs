@@ -33,7 +33,7 @@ uint32_t u32_max(uint32_t a, uint32_t b) {
 }
 
 struct fs_rec_header *scan_for_header(uint32_t start, uint32_t partition_size) {
-	start = ALIGN_UP(start);
+	start = align_up_32(start, FS_HEADER_ALIGN);
 	for (uint32_t i = start; i < partition_size - sizeof(struct fs_rec_header); i += FS_HEADER_ALIGN) {
 		struct fs_rec_header *header = (struct fs_rec_header *) (flash_mmap + i);
 		if (header->magic == FS_START || header->magic == FS_START_CLEAN)
@@ -70,7 +70,7 @@ struct fs_rec_header *process_advance_header(struct fs_rec_header *cur_header, u
 		next_offset += sizeof(struct fs_rec_header);
 		next_offset += filename_len_padded;
 		next_offset += cur_header->data_len;
-		next_offset = ALIGN_UP(next_offset);
+		next_offset = align_up_32(next_offset, FS_HEADER_ALIGN);
 	}
 
 	if (next_offset >= partition_size)
@@ -208,17 +208,17 @@ uint32_t check_free_space(uint32_t current_offset, uint32_t write_offset, uint32
 		uint32_t old_filename_len = strlen((char *) old_file + sizeof(struct fs_rec_header));
 
 		old_file_total = sizeof(struct fs_rec_header) + old_filename_len + 1 + old_file->data_len;
-		old_file_total = ALIGN_UP(old_file_total);
+		old_file_total = align_up_32(old_file_total, FS_HEADER_ALIGN);
 	}
 
 	uint32_t new_file_total = sizeof(struct fs_rec_header) + filename_len + 1 + len;
-	new_file_total = ALIGN_UP(new_file_total);
+	new_file_total = align_up_32(new_file_total, FS_HEADER_ALIGN);
 
 	uint32_t wrap_marker_total = sizeof(struct fs_rec_header) + 1;
-	wrap_marker_total = ALIGN_UP(wrap_marker_total);
+	wrap_marker_total = align_up_32(wrap_marker_total, FS_HEADER_ALIGN);
 
 	uint32_t largest_file_total = sizeof(struct fs_rec_header) + largest_filename_len + 1 + largest_file_size;
-	largest_file_total = ALIGN_UP(largest_file_total);
+	largest_file_total = align_up_32(largest_file_total, FS_HEADER_ALIGN);
 	// the current file we're writing might be larger than current largest
 	largest_file_total = u32_max(largest_file_total, u32_max(new_file_total, old_file_total));
 
@@ -235,7 +235,7 @@ uint32_t check_free_space(uint32_t current_offset, uint32_t write_offset, uint32
 		current_position = 0;
 	}
 	current_position += new_file_total;
-	current_position = ALIGN_UP(current_position);
+	current_position = align_up_32(current_position, FS_HEADER_ALIGN);
 
 	// check if we can write the old file
 	if (old_file_total + wrap_marker_total > partition_size - current_position) {
@@ -245,7 +245,7 @@ uint32_t check_free_space(uint32_t current_offset, uint32_t write_offset, uint32
 		current_position = 0;
 	}
 	current_position += old_file_total;
-	current_position = ALIGN_UP(current_position);
+	current_position = align_up_32(current_position, FS_HEADER_ALIGN);
 
 	// now we try to add the largerst file, twice
 	for (uint32_t i = 0; i < 2; i++) {
@@ -256,7 +256,7 @@ uint32_t check_free_space(uint32_t current_offset, uint32_t write_offset, uint32
 			current_position = 0;
 		}
 		current_position += largest_file_total;
-		current_position = ALIGN_UP(current_position);
+		current_position = align_up_32(current_position, FS_HEADER_ALIGN);
 
 		// we cannot end such that the tail is in the same sector as the head,
 		uint32_t sector_size = flash_get_sector_size();
@@ -288,10 +288,10 @@ uint32_t append_file(const char *filename, uint32_t *current_offset, void *buffe
 		return FS_ENOSPC;
 
 	uint32_t new_file_total = sizeof(struct fs_rec_header) + filename_len + 1 + len;
-	new_file_total = ALIGN_UP(new_file_total);
+	new_file_total = align_up_32(new_file_total, FS_HEADER_ALIGN);
 
 	uint32_t wrap_marker_total = sizeof(struct fs_rec_header) + 1;
-	wrap_marker_total = ALIGN_UP(wrap_marker_total);
+	wrap_marker_total = align_up_32(wrap_marker_total, FS_HEADER_ALIGN);
 
 	// mark old file as migrating
 	if (*current_offset != UINT32_MAX) {
@@ -344,7 +344,7 @@ uint32_t append_file(const char *filename, uint32_t *current_offset, void *buffe
 	}
 	
 	fs_tail = new_file_offset + sizeof(struct fs_rec_header) + filename_len + 1 + len;
-	fs_tail = ALIGN_UP(fs_tail);
+	fs_tail = align_up_32(fs_tail, FS_HEADER_ALIGN);
 
 	if (!has_wear_marker && *current_offset != UINT32_MAX && add_wear_marker) {
 		char empty = 0;
@@ -368,7 +368,7 @@ uint32_t lfs_set_file(int fd) {
 }
 
 uint32_t remove_false_magic(uint8_t *start, uint32_t size) {
-	for (uint8_t *p = (uint8_t *) ALIGN_UP((uint64_t) start); p < start + size; p += FS_HEADER_ALIGN) {
+	for (uint8_t *p = (uint8_t *) align_up_64((uint64_t) start, FS_HEADER_ALIGN); p < start + size; p += FS_HEADER_ALIGN) {
 		uint16_t magic = *((uint16_t *) p);
 		// if data is any magic number, set it to 0 to avoid picking it up by mistake
 		if (magic == FS_RECORD || magic == FS_START || magic == FS_START_CLEAN) {
@@ -403,7 +403,7 @@ uint32_t erase_file(uint32_t cur_offset, uint32_t next_offset) {
 
 	// clobber part of block the new file is in, that is before the file
 	if (next_offset % sector_size != 0) {
-		uint32_t sector_start = (next_offset / sector_size) * sector_size;
+		uint32_t sector_start = align_down_32(next_offset, sector_size);
 		if (remove_false_magic(flash_mmap + sector_start, next_offset % sector_size))
 			return FS_EFLASH;
 	}
@@ -618,7 +618,7 @@ uint32_t lfs_mount() {
 
 		fs_head = 0;
 		fs_tail = sizeof(struct fs_rec_header) + 1;
-		fs_tail = ALIGN_UP(fs_tail);
+		fs_tail = align_up_32(fs_tail, FS_HEADER_ALIGN);
 
 		printf("head = 0x%lx\n", (uint64_t) fs_head);
 		printf("tail = 0x%lx\n", (uint64_t) fs_tail);
@@ -757,7 +757,7 @@ uint32_t lfs_mount() {
 				if (change_file_data_len(cur_header, 0))
 					return FS_EFLASH;
 
-				fs_tail = ALIGN_UP(terminate_position + 1);
+				fs_tail = align_up_32(terminate_position + 1, FS_HEADER_ALIGN);
 			}
 
 			if (change_file_status(reserved, STATUS_DELETED))

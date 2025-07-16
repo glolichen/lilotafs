@@ -1,14 +1,25 @@
-#ifndef LILOTAHS_H
-#define LILOTAHS_H
+#ifndef LILOTAFS_H
+#define LILOTAFS_H
 
 #include <stdint.h>
 #include <stdbool.h>
 
 #define FS_HEADER_ALIGN 32
+#define FS_DATA_ALIGN 16
 #define WEAR_LEVEL_MAX_RECORDS 5
 
-#define ALIGN_DOWN(addr) ((addr) & (~(FS_HEADER_ALIGN - 1)))
-#define ALIGN_UP(addr) ((addr) % FS_HEADER_ALIGN == 0 ? (addr) : ((ALIGN_DOWN(addr)) + FS_HEADER_ALIGN))
+#define ALIGN_DOWN_FUNC(bits) \
+static inline uint##bits##_t align_down_##bits(uint##bits##_t num, uint##bits##_t amount) { \
+	return (num / amount) * amount; \
+}
+#define ALIGN_UP_FUNC(bits) \
+static inline uint##bits##_t align_up_##bits(uint##bits##_t num, uint##bits##_t amount) { \
+	return num % amount == 0 ? num : (align_down_##bits(num, amount) + amount); \
+}
+ALIGN_DOWN_FUNC(32)
+ALIGN_UP_FUNC(32)
+ALIGN_DOWN_FUNC(64)
+ALIGN_UP_FUNC(64)
 
 #define FS_SUCCESS 0 // Operation successful
 #define FS_ENOSPC (UINT32_MAX - 1) // Insufficient space (4294967294)
