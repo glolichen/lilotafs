@@ -132,13 +132,18 @@ int main(int argc, char *argv[]) {
 		}
 
 		if (code != FS_SUCCESS && code != FS_ENOSPC) {
-			free(random);
 			printf("write error: %u\n", code);
 			error_code = code;
 			goto cleanup;
 		}
 
+#ifdef OPS_PER_REMOUNT
 		if (code == FS_ENOSPC || (op % OPS_PER_REMOUNT == 0 && op != 0)) {
+#else
+		if (code == FS_ENOSPC) {
+			printf("no space, inspect: %u\n", inspect_fs(files));
+			exit(1);
+#endif
 			printf("\n\n=============== UNMOUNT/REMOUNT ===============\n");
 			if (code == FS_SUCCESS) {
 				uint32_t wrong = inspect_fs(files);
@@ -155,7 +160,6 @@ int main(int argc, char *argv[]) {
 			lfs_set_file(disk);
 			uint32_t mount_code = lfs_mount();
 			if (mount_code != FS_SUCCESS) {
-				free(random);
 				printf("mount error: %u\n", code);
 				error_code = code;
 				goto cleanup;

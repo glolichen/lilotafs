@@ -4,8 +4,8 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define FS_HEADER_ALIGN 32
-#define FS_DATA_ALIGN 16
+#define FS_HEADER_ALIGN 8
+#define FS_DATA_ALIGN 8
 #define WEAR_LEVEL_MAX_RECORDS 5
 
 #define ALIGN_DOWN_FUNC(bits) \

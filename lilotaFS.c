@@ -69,6 +69,7 @@ struct fs_rec_header *process_advance_header(struct fs_rec_header *cur_header, u
 		next_offset = current_offset;
 		next_offset += sizeof(struct fs_rec_header);
 		next_offset += filename_len_padded;
+		next_offset = align_up_32(next_offset, FS_DATA_ALIGN);
 		next_offset += cur_header->data_len;
 		next_offset = align_up_32(next_offset, FS_HEADER_ALIGN);
 	}
@@ -207,17 +208,23 @@ uint32_t check_free_space(uint32_t current_offset, uint32_t write_offset, uint32
 		// the old and new file names should really be the same, but checking to be safe
 		uint32_t old_filename_len = strlen((char *) old_file + sizeof(struct fs_rec_header));
 
-		old_file_total = sizeof(struct fs_rec_header) + old_filename_len + 1 + old_file->data_len;
+		old_file_total = sizeof(struct fs_rec_header) + old_filename_len + 1;
+		old_file_total = align_up_32(old_file_total, FS_DATA_ALIGN);
+		old_file_total += old_file->data_len;
 		old_file_total = align_up_32(old_file_total, FS_HEADER_ALIGN);
 	}
 
-	uint32_t new_file_total = sizeof(struct fs_rec_header) + filename_len + 1 + len;
+	uint32_t new_file_total = sizeof(struct fs_rec_header) + filename_len + 1;
+	new_file_total = align_up_32(new_file_total, FS_DATA_ALIGN);
+	new_file_total += len;
 	new_file_total = align_up_32(new_file_total, FS_HEADER_ALIGN);
 
 	uint32_t wrap_marker_total = sizeof(struct fs_rec_header) + 1;
 	wrap_marker_total = align_up_32(wrap_marker_total, FS_HEADER_ALIGN);
 
-	uint32_t largest_file_total = sizeof(struct fs_rec_header) + largest_filename_len + 1 + largest_file_size;
+	uint32_t largest_file_total = sizeof(struct fs_rec_header) + largest_filename_len + 1;
+	largest_file_total = align_up_32(largest_file_total, FS_DATA_ALIGN);
+	largest_file_total += largest_file_size;
 	largest_file_total = align_up_32(largest_file_total, FS_HEADER_ALIGN);
 	// the current file we're writing might be larger than current largest
 	largest_file_total = u32_max(largest_file_total, u32_max(new_file_total, old_file_total));
@@ -287,7 +294,9 @@ uint32_t append_file(const char *filename, uint32_t *current_offset, void *buffe
 	if (check_free_space(*current_offset, fs_tail, filename_len, len))
 		return FS_ENOSPC;
 
-	uint32_t new_file_total = sizeof(struct fs_rec_header) + filename_len + 1 + len;
+	uint32_t new_file_total = sizeof(struct fs_rec_header) + filename_len + 1;
+	new_file_total = align_up_32(new_file_total, FS_DATA_ALIGN);
+	new_file_total += len;
 	new_file_total = align_up_32(new_file_total, FS_HEADER_ALIGN);
 
 	uint32_t wrap_marker_total = sizeof(struct fs_rec_header) + 1;
@@ -325,10 +334,12 @@ uint32_t append_file(const char *filename, uint32_t *current_offset, void *buffe
 		return FS_EFLASH;
 
 	// phase 2: write data
+	uint32_t data_offset = new_file_offset + sizeof(struct fs_rec_header) + filename_len + 1;
+	data_offset = align_up_32(data_offset, FS_DATA_ALIGN);
 	if (flash_write(flash_mmap, filename, new_file_offset + sizeof(struct fs_rec_header), filename_len + 1))
 		return FS_EFLASH;
 	if (len) {
-		if (flash_write(flash_mmap, buffer, new_file_offset + sizeof(struct fs_rec_header) + filename_len + 1, len))
+		if (flash_write(flash_mmap, buffer, data_offset, len))
 			return FS_EFLASH;
 	}
 
@@ -343,8 +354,7 @@ uint32_t append_file(const char *filename, uint32_t *current_offset, void *buffe
 			return FS_EFLASH;
 	}
 	
-	fs_tail = new_file_offset + sizeof(struct fs_rec_header) + filename_len + 1 + len;
-	fs_tail = align_up_32(fs_tail, FS_HEADER_ALIGN);
+	fs_tail = align_up_32(data_offset + len, FS_HEADER_ALIGN);
 
 	if (!has_wear_marker && *current_offset != UINT32_MAX && add_wear_marker) {
 		char empty = 0;
@@ -383,7 +393,13 @@ uint32_t remove_false_magic(uint8_t *start, uint32_t size) {
 
 uint32_t clobber_file_data(struct fs_rec_header *file) {
 	char *filename = (char *) file + sizeof(struct fs_rec_header);
-	return remove_false_magic((uint8_t *) filename, file->data_len + strlen(filename) + 1);
+	uint32_t filename_offset = (uint64_t) filename - (uint64_t) flash_mmap;
+
+	uint32_t data_offset = filename_offset + strlen(filename) + 1;
+	data_offset = align_up_32(data_offset, FS_DATA_ALIGN);
+	data_offset += file->data_len;
+
+	return remove_false_magic((uint8_t *) filename, data_offset - filename_offset);
 }
 
 uint32_t erase_file(uint32_t cur_offset, uint32_t next_offset) {
@@ -464,7 +480,10 @@ uint32_t wear_level_compact(struct fs_rec_header *wear_marker, uint32_t num_file
 			count--;
 
 			char *filename = (char *) cur_header + sizeof(struct fs_rec_header);
-			uint8_t *data_start = (uint8_t *) (filename + strlen(filename) + 1);
+
+			uint32_t data_offset = cur_offset + sizeof(struct fs_rec_header) + strlen(filename) + 1;
+			data_offset = align_up_32(data_offset, FS_DATA_ALIGN);
+			uint8_t *data_start = (uint8_t *) flash_mmap + data_offset;
 
 			uint32_t code = append_file(filename, &cur_offset_after_move, data_start,
 										cur_header->data_len, STATUS_COMMITTED, false);
@@ -725,7 +744,13 @@ uint32_t lfs_mount() {
 
 		bool can_write = FLASH_CAN_WRITE(migrating->data_len, reserved->data_len);
 
-		uint32_t total_size = strlen(filename) + 1 + migrating->data_len;
+		// somewhat complicated, since we need to account for the fact that data
+		// must be on xx-byte aligned boundaries (probably 16)
+		// takes advantage of the fact that header align is a multiple of 16
+		uint32_t total_size = sizeof(struct fs_rec_header) + strlen(filename) + 1;
+		total_size = align_up_32(total_size, FS_DATA_ALIGN);
+		total_size = total_size + migrating->data_len - sizeof(struct fs_rec_header);
+
 		uint8_t *migrating_ptr = (uint8_t *) filename;
 		uint8_t *reserved_ptr = (uint8_t *) reserved + sizeof(struct fs_rec_header);
 
@@ -940,10 +965,12 @@ uint32_t vfs_read(uint32_t fd, void *buffer, uint32_t addr, uint32_t len) {
 		return FS_EBADF;
 
 	struct fs_file_descriptor descriptor = fd_list[fd - 1];
-	struct fs_rec_header *header = (struct fs_rec_header *) (flash_mmap + descriptor.offset);
 
-	char *filename = (char *) header + sizeof(struct fs_rec_header);
-	uint8_t *data_start = (uint8_t *) filename + strlen(filename) + 1;
+	char *filename = (char *) flash_mmap + descriptor.offset + sizeof(struct fs_rec_header);
+	uint32_t data_offset = descriptor.offset + sizeof(struct fs_rec_header) + strlen(filename) + 1;
+	data_offset = align_up_32(data_offset, FS_DATA_ALIGN);
+	uint8_t *data_start = (uint8_t *) flash_mmap + data_offset;
+
 	memcpy(buffer, data_start + addr, len);
 
 	return FS_SUCCESS;
