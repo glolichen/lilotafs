@@ -42,6 +42,41 @@ struct fs_rec_header *scan_for_header(uint32_t start, uint32_t partition_size) {
 	return NULL;
 }
 
+uint32_t change_file_magic(struct fs_rec_header *file_header, uint16_t magic) {
+	uint32_t file_offset = (uint64_t) file_header - (uint64_t) flash_mmap;
+	uint32_t magic_addr = file_offset + offsetof(struct fs_rec_header, magic);
+
+	int out = flash_write(flash_mmap, &magic, magic_addr, 2);
+	if (out)
+		return FS_EFLASH;
+
+	file_header->magic = magic;
+	return 0;
+}
+uint32_t change_file_status(struct fs_rec_header *file_header, uint8_t status) {
+	uint32_t file_offset = (uint64_t) file_header - (uint64_t) flash_mmap;
+	uint32_t status_addr = file_offset + offsetof(struct fs_rec_header, status);
+
+	int out = flash_write(flash_mmap, &status, status_addr, 1);
+	if (out)
+		return FS_EFLASH;
+
+	file_header->status = status;
+	return 0;
+}
+uint32_t change_file_data_len(struct fs_rec_header *file_header, uint32_t data_len) {
+	uint32_t file_offset = (uint64_t) file_header - (uint64_t) flash_mmap;
+	uint32_t data_len_addr = file_offset + offsetof(struct fs_rec_header, data_len);
+
+	int out = flash_write(flash_mmap, &data_len, data_len_addr, 4);
+	if (out)
+		return FS_EFLASH;
+
+	file_header->data_len = data_len;
+	return 0;
+}
+
+
 struct fs_rec_header *process_advance_header(struct fs_rec_header *cur_header, uint32_t partition_size) {
 	uint64_t current_offset = (uint64_t) cur_header - (uint64_t) flash_mmap;
 
@@ -62,8 +97,20 @@ struct fs_rec_header *process_advance_header(struct fs_rec_header *cur_header, u
 
 	uint32_t next_offset;
 	// if wrap header, back to start of partition
-	if (cur_header->status == STATUS_WRAP_MARKER)
+	if (cur_header->status == STATUS_WRAP_MARKER) {
+		// if we crash while writing the data_len field of the wrap marker
+		// if 0 is written to filename, guarantees data_len is properly written
+		char *filename = (char *) cur_header + sizeof(struct fs_rec_header);
+		if (filename[0] != 0) {
+			uint8_t zero = 0;
+			uint32_t filename_offset = (uint64_t) filename - (uint64_t) flash_mmap;
+			if (change_file_data_len(cur_header, 0))
+				return NULL;
+			if (flash_write(flash_mmap, &zero, filename_offset, 1))
+				return NULL;
+		}
 		next_offset = 0;
+	}
 	else {
 		// go to next header
 		next_offset = current_offset;
@@ -133,48 +180,6 @@ struct scan_headers_result {
 	ret.last_header = cur_header;
 	return ret;
 }
-
-uint32_t change_file_magic(struct fs_rec_header *file_header, uint16_t magic) {
-	uint32_t file_offset = (uint64_t) file_header - (uint64_t) flash_mmap;
-	uint32_t magic_addr = file_offset + offsetof(struct fs_rec_header, magic);
-
-	int out = flash_write(flash_mmap, &magic, magic_addr, 2);
-	if (out)
-		return FS_EFLASH;
-
-	file_header->magic = magic;
-	return 0;
-}
-uint32_t change_file_status(struct fs_rec_header *file_header, uint8_t status) {
-	uint32_t file_offset = (uint64_t) file_header - (uint64_t) flash_mmap;
-	uint32_t status_addr = file_offset + offsetof(struct fs_rec_header, status);
-
-	int out = flash_write(flash_mmap, &status, status_addr, 1);
-	if (out)
-		return FS_EFLASH;
-
-	file_header->status = status;
-	return 0;
-}
-uint32_t change_file_data_len(struct fs_rec_header *file_header, uint32_t data_len) {
-	uint32_t file_offset = (uint64_t) file_header - (uint64_t) flash_mmap;
-	uint32_t data_len_addr = file_offset + offsetof(struct fs_rec_header, data_len);
-
-	int out = flash_write(flash_mmap, &data_len, data_len_addr, 4);
-	if (out)
-		return FS_EFLASH;
-
-	file_header->data_len = data_len;
-	return 0;
-}
-
-// uint32_t calculate_free_space() {
-// 	uint32_t partition_size = flash_get_total_size();
-// 	uint32_t actual_head = ALIGN_DOWN(fs_head);
-// 	if (fs_tail > actual_head)
-// 		return partition_size - (fs_tail - actual_head);
-// 	return actual_head - fs_tail;
-// }
 
 uint32_t check_free_space(uint32_t current_offset, uint32_t write_offset, uint32_t filename_len, uint32_t len) {
 	uint32_t partition_size = flash_get_total_size();
@@ -518,14 +523,6 @@ uint32_t wear_level_compact(struct fs_rec_header *wear_marker, uint32_t num_file
 		// If here or earlier, then there is an FS_START_CLEAN (next)
 		// and maybe an FS_START, depending on whether the current file's header is erased
 
-
-		// if (count == 1) {
-		// 	PRINTF("CRASH\n");
-		// 	PRINTF("0x%lx\n", (uint64_t) cur_header - (uint64_t) flash_mmap);
-		// 	PRINTF("0x%lx\n", (uint64_t) next_header - (uint64_t) flash_mmap);
-		// 	exit(1);
-		// }
-
 		// done with processing the current file
 		// now advance FS_START and delete the just-moved file
 		if (change_file_magic(next_header, FS_START))
@@ -770,21 +767,45 @@ uint32_t lfs_mount() {
 		uint32_t reserved_offset = (uint64_t) reserved - (uint64_t) flash_mmap;
 		char *migrating_filename = (char *) migrating + sizeof(struct fs_rec_header);
 
-		bool can_write = FLASH_CAN_WRITE(migrating->data_len, reserved->data_len);
+		uint32_t reserved_filename_len = 0;
+		char *reserved_filename = (char *) reserved + sizeof(struct fs_rec_header);
+		for (uint32_t i = 0; i < 64; i++) {
+			if (reserved_filename[i] == 0)
+				break;
+			reserved_filename_len++;
+		}
 
-		// somewhat complicated, since we need to account for the fact that data
-		// must be on xx-byte aligned boundaries (probably 16)
-		// takes advantage of the fact that header align is a multiple of 16
-		uint32_t total_size = sizeof(struct fs_rec_header) + strlen(migrating_filename) + 1;
-		total_size = align_up_32(total_size, FS_DATA_ALIGN);
-		total_size = total_size + migrating->data_len - sizeof(struct fs_rec_header);
-
+		bool can_write;
+		uint32_t total_size = 0;
 		uint8_t *migrating_ptr = (uint8_t *) migrating_filename;
 		uint8_t *reserved_ptr = (uint8_t *) reserved + sizeof(struct fs_rec_header);
 
-		for (uint32_t i = 0; i < total_size && can_write; i++) {
-			if (!FLASH_CAN_WRITE(migrating_ptr[i], reserved_ptr[i]))
-				can_write = false;
+		// consider this case:
+		//  1. migrating && reserved
+		//  2. reserved data_len and filename are written, crash in the middle of writing file data
+		//  3. the actual length of reserved is a lot more than migrating
+		// observe that we do not want to write directly ("can_write = true") in this case
+		// specifically, when reserved.data_len is written and is greater than migrating.data_len
+		// even if we COULD write all of migrating in, we do not know about whatever data comes after
+		// and we may not be able to put the next file there
+
+		if (reserved_filename_len != 64 && reserved->data_len > migrating->data_len)
+			can_write = false;
+		else {
+			can_write = FLASH_CAN_WRITE(migrating->data_len, reserved->data_len);
+
+			// somewhat complicated, since we need to account for the fact that data
+			// must be on xx-byte aligned boundaries (probably 16)
+			// takes advantage of the fact that header align is a multiple of 16
+
+			total_size = sizeof(struct fs_rec_header) + strlen(migrating_filename) + 1;
+			total_size = align_up_32(total_size, FS_DATA_ALIGN);
+			total_size = total_size + migrating->data_len - sizeof(struct fs_rec_header);
+
+			for (uint32_t i = 0; i < total_size && can_write; i++) {
+				if (!FLASH_CAN_WRITE(migrating_ptr[i], reserved_ptr[i]))
+					can_write = false;
+			}
 		}
 
 		if (can_write) {
@@ -810,14 +831,6 @@ uint32_t lfs_mount() {
 			// 64 bytes after the header
 
 			if (cur_header == reserved) {
-				uint32_t reserved_filename_len = 0;
-				char *reserved_filename = (char *) reserved + sizeof(struct fs_rec_header);
-				for (uint32_t i = 0; i < 64; i++) {
-					if (reserved_filename[i] == 0)
-						break;
-					reserved_filename_len++;
-				}
-
 				// if strlen is 64 then there is never broken out of loop <=> no terminator
 				if (reserved_filename_len != 64) {
 					// case 2
@@ -847,8 +860,14 @@ uint32_t lfs_mount() {
 				return FS_EFLASH;
 
 			uint32_t migrating_offset = (uint64_t) migrating - (uint64_t) flash_mmap;
-			uint32_t code = append_file(migrating_filename, &migrating_offset, migrating_ptr + strlen(migrating_filename) + 1,
-							   migrating->data_len, STATUS_COMMITTED, false);
+			uint32_t migrating_data_offset = migrating_offset + sizeof(struct fs_rec_header);
+			migrating_data_offset += strlen(migrating_filename) + 1;
+			migrating_data_offset = align_up_32(migrating_data_offset, FS_DATA_ALIGN);
+			
+			uint32_t code = append_file(
+				migrating_filename, &migrating_offset, flash_mmap + migrating_data_offset,
+				migrating->data_len, STATUS_COMMITTED, false
+			);
 
 			if (code != FS_SUCCESS)
 				return code;
@@ -877,9 +896,17 @@ uint32_t lfs_mount() {
 			// there is no committed file of the same name
 			// append a file with the same contents
 
+			// uint32_t migrating_offset = (uint64_t) scan_result.migrating - (uint64_t) flash_mmap;
+
 			uint32_t migrating_offset = (uint64_t) scan_result.migrating - (uint64_t) flash_mmap;
-			uint32_t code = append_file(filename, &migrating_offset, filename + strlen(filename) + 1,
-							   scan_result.migrating->data_len, STATUS_COMMITTED, false);
+			uint32_t migrating_data_offset = migrating_offset + sizeof(struct fs_rec_header);
+			migrating_data_offset += strlen(filename) + 1;
+			migrating_data_offset = align_up_32(migrating_data_offset, FS_DATA_ALIGN);
+
+			uint32_t code = append_file(
+				filename, &migrating_offset, flash_mmap + migrating_data_offset,
+				scan_result.migrating->data_len, STATUS_COMMITTED, false
+			);
 
 			if (code != FS_SUCCESS)
 				return code;

@@ -145,7 +145,7 @@ int main(int argc, char *argv[]) {
 		for (uint32_t i = 0; i < size; i++)
 			random[i] = RANDOM_NUMBER(0, 255);
 
-		if (op == 3160)
+		if (op == 2106)
 			printf("\n");
 
 		uint32_t code = vfs_write(fds[file], random, size);
