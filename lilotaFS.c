@@ -6,19 +6,19 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
-#include <setjmp.h>
 #include <sys/mman.h>
 #include <sys/types.h>
 
 #include "flash.h"
-
-extern jmp_buf lfs_mount_jmp_buf;
+#include "util.h"
 
 uint8_t *flash_mmap;
 uint32_t fs_head, fs_tail;
 uint32_t largest_file_size, largest_filename_len;
 
 bool has_wear_marker;
+
+uint32_t vfs_open_error = 0;
 
 uint32_t fd_list_size = 0, fd_list_capacity = 0;
 struct fs_file_descriptor *fd_list = NULL;
@@ -117,8 +117,10 @@ struct scan_headers_result {
 			ret.wrap_marker = cur_header;
 		if (cur_header->status == STATUS_MIGRATING)
 			ret.migrating = cur_header;
-		if (cur_header->status == STATUS_RESERVED)
+		if (cur_header->status == STATUS_RESERVED) {
 			ret.reserved = cur_header;
+			break;
+		}
 
 		struct fs_rec_header *next_header = process_advance_header(cur_header, partition_size);
 		if (!next_header)
@@ -455,7 +457,7 @@ uint32_t wear_level_compact(struct fs_rec_header *wear_marker, uint32_t num_file
 
 	// this should be impossible
 	if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START && cur_header->magic != FS_START_CLEAN) {
-		printf("??????????\n");
+		PRINTF("??????????\n");
 		return FS_EUNKNOWN;
 	}
 
@@ -518,9 +520,9 @@ uint32_t wear_level_compact(struct fs_rec_header *wear_marker, uint32_t num_file
 
 
 		// if (count == 1) {
-		// 	printf("CRASH\n");
-		// 	printf("0x%lx\n", (uint64_t) cur_header - (uint64_t) flash_mmap);
-		// 	printf("0x%lx\n", (uint64_t) next_header - (uint64_t) flash_mmap);
+		// 	PRINTF("CRASH\n");
+		// 	PRINTF("0x%lx\n", (uint64_t) cur_header - (uint64_t) flash_mmap);
+		// 	PRINTF("0x%lx\n", (uint64_t) next_header - (uint64_t) flash_mmap);
 		// 	exit(1);
 		// }
 
@@ -588,17 +590,11 @@ uint32_t lfs_unmount() {
 
 
 uint32_t lfs_mount() {
-	if (setjmp(lfs_mount_jmp_buf)) {
-		// simulated crash will long jump back to here
-		// simulate computer restart by unmounting and remounting
-		printf("SIMULATE CRASH!!!\n");
-		lfs_unmount();
-		exit(1);
-	}
-
 	largest_file_size = 0, largest_filename_len = 0;
 	fs_head = 0, fs_tail = 0;
 	has_wear_marker = false;
+
+	vfs_open_error = 0;
 
 	uint32_t partition_size = flash_get_total_size();
 
@@ -615,7 +611,42 @@ uint32_t lfs_mount() {
 		if (scan_result.wear_marker)
 			wear_marker = scan_result.wear_marker;
 
+		// scan_headers will return either the space directly after the last file,
+		// or the header of the last file in case the last file is a reserved file
+		// this is because we do not know when we crashed previously when writing it
+		// so we cannot accurately determine when the reserved file ends
+		//
+		// if we crash while or before writing the filename, then either data_len is bad
+		// or the filename is not terminated -- so we know no actual data has been written
+		// since the max file length is 64, we can assume that is where free space starts
+		//
+		// if we crash afterwards, then the filename is intact and null terminated
+		// this guarantees that data_len was properly written, and can trust it
+		//
+		// (we deal with this crash again later on)
+
 		uint32_t offset = (uint64_t) cur_header - (uint64_t) flash_mmap;
+		if (cur_header == scan_result.reserved && cur_header->status == STATUS_RESERVED) {
+			uint32_t reserved_filename_len = 0;
+			char *reserved_filename = (char *) scan_result.reserved + sizeof(struct fs_rec_header);
+			for (uint32_t i = 0; i < 64; i++) {
+				if (reserved_filename[i] == 0)
+					break;
+				reserved_filename_len++;
+			}
+
+			if (reserved_filename_len != 64) {
+				offset += sizeof(struct fs_rec_header) + reserved_filename_len + 1;
+				offset = align_up_32(offset, FS_DATA_ALIGN);
+				offset += cur_header->data_len;
+				offset = align_up_32(offset, FS_HEADER_ALIGN);
+			}
+			else {
+				offset += sizeof(struct fs_rec_header) + 64;
+				offset = align_up_32(offset, FS_HEADER_ALIGN);
+			}
+		}
+
 		// scan disk 1 byte at a time until we find FS_START magic
 		cur_header = scan_for_header(offset, partition_size);
 	}
@@ -639,8 +670,8 @@ uint32_t lfs_mount() {
 		fs_tail = sizeof(struct fs_rec_header) + 1;
 		fs_tail = align_up_32(fs_tail, FS_HEADER_ALIGN);
 
-		printf("head = 0x%lx\n", (uint64_t) fs_head);
-		printf("tail = 0x%lx\n", (uint64_t) fs_tail);
+		PRINTF("head = 0x%lx\n", (uint64_t) fs_head);
+		PRINTF("tail = 0x%lx\n", (uint64_t) fs_tail);
 
 		return FS_SUCCESS;
 	}
@@ -720,11 +751,8 @@ uint32_t lfs_mount() {
 	if (scan_result.wear_marker)
 		wear_marker = scan_result.wear_marker;
 
-	// there is a very weird edge case: if we crash while writing the file name,
-	// the file name string is not terminated, leading to scan_headers detecting
-	// "a file that is too long" (as the string goes on and on)
-	// so if the last header is reserved, fs_tail is not necessarily correct!
-	// we will deal with this later
+	// this is not actually the tail! scan_headers ends on a reserved file
+	// because we do not know how much of that file was successfully written
 	fs_tail = (uint64_t) cur_header - (uint64_t) flash_mmap;
 
 	// TODO: consider whether to wear level before recovery
@@ -740,18 +768,18 @@ uint32_t lfs_mount() {
 		struct fs_rec_header *reserved = scan_result.reserved;
 
 		uint32_t reserved_offset = (uint64_t) reserved - (uint64_t) flash_mmap;
-		char *filename = (char *) migrating + sizeof(struct fs_rec_header);
+		char *migrating_filename = (char *) migrating + sizeof(struct fs_rec_header);
 
 		bool can_write = FLASH_CAN_WRITE(migrating->data_len, reserved->data_len);
 
 		// somewhat complicated, since we need to account for the fact that data
 		// must be on xx-byte aligned boundaries (probably 16)
 		// takes advantage of the fact that header align is a multiple of 16
-		uint32_t total_size = sizeof(struct fs_rec_header) + strlen(filename) + 1;
+		uint32_t total_size = sizeof(struct fs_rec_header) + strlen(migrating_filename) + 1;
 		total_size = align_up_32(total_size, FS_DATA_ALIGN);
 		total_size = total_size + migrating->data_len - sizeof(struct fs_rec_header);
 
-		uint8_t *migrating_ptr = (uint8_t *) filename;
+		uint8_t *migrating_ptr = (uint8_t *) migrating_filename;
 		uint8_t *reserved_ptr = (uint8_t *) reserved + sizeof(struct fs_rec_header);
 
 		for (uint32_t i = 0; i < total_size && can_write; i++) {
@@ -760,7 +788,6 @@ uint32_t lfs_mount() {
 		}
 
 		if (can_write) {
-			printf("HELLO WORLD\n");
 			if (change_file_data_len(reserved, migrating->data_len))
 				return FS_EFLASH;
 			if (flash_write(flash_mmap, migrating_ptr, reserved_offset + sizeof(struct fs_rec_header), total_size))
@@ -771,25 +798,56 @@ uint32_t lfs_mount() {
 				return FS_EFLASH;
 		}
 		else {
-			// if the head is also the reserved file... weird edge case described earlier
+			// two possibilities: 1. crash while or before writing the filename, or 2. after
+			// if 1, we can terminate filename since we know what length it is from migrating
+			// in this case, the data len may also not have been properly written yet
+			// which is fine because we will set data_len to 0 anyway (since no data was written at all)
+			// if 2, we do not know how much of the content was written and where free space starts
+			// so we will leave the data_len as is (the data_len must have been properly written)
+			// and move fs_tail forward by the size of the file
+			//
+			// we can detect which case by checking if there is a null terminator \0 in the first
+			// 64 bytes after the header
+
 			if (cur_header == reserved) {
-				uint8_t zero = 0;
-				uint32_t terminate_position = fs_tail + sizeof(struct fs_rec_header);
-				terminate_position += strlen(filename);
+				uint32_t reserved_filename_len = 0;
+				char *reserved_filename = (char *) reserved + sizeof(struct fs_rec_header);
+				for (uint32_t i = 0; i < 64; i++) {
+					if (reserved_filename[i] == 0)
+						break;
+					reserved_filename_len++;
+				}
 
-				if (flash_write(flash_mmap, &zero, terminate_position, 1))
-					return FS_EFLASH;
-				if (change_file_data_len(cur_header, 0))
-					return FS_EFLASH;
+				// if strlen is 64 then there is never broken out of loop <=> no terminator
+				if (reserved_filename_len != 64) {
+					// case 2
+					fs_tail += sizeof(struct fs_rec_header) + strlen(reserved_filename) + 1;
+					fs_tail = align_up_32(fs_tail, FS_DATA_ALIGN);
+					fs_tail += reserved->data_len;
+					fs_tail = align_up_32(fs_tail, FS_HEADER_ALIGN);
+				}
+				else {
+					// case 1
+					uint8_t zero = 0;
+					uint32_t terminate_position = fs_tail + sizeof(struct fs_rec_header);
+					terminate_position += strlen(migrating_filename);
 
-				fs_tail = align_up_32(terminate_position + 1, FS_HEADER_ALIGN);
+					// note we are writing the data len first!
+					// so that if we crash between these two writes, we waste less space
+					if (change_file_data_len(cur_header, 0))
+						return FS_EFLASH;
+					if (flash_write(flash_mmap, &zero, terminate_position, 1))
+						return FS_EFLASH;
+
+					fs_tail = align_up_32(terminate_position + 1, FS_HEADER_ALIGN);
+				}
 			}
 
 			if (change_file_status(reserved, STATUS_DELETED))
 				return FS_EFLASH;
 
 			uint32_t migrating_offset = (uint64_t) migrating - (uint64_t) flash_mmap;
-			uint32_t code = append_file(filename, &migrating_offset, migrating_ptr + strlen(filename) + 1,
+			uint32_t code = append_file(migrating_filename, &migrating_offset, migrating_ptr + strlen(migrating_filename) + 1,
 							   migrating->data_len, STATUS_COMMITTED, false);
 
 			if (code != FS_SUCCESS)
@@ -809,6 +867,7 @@ uint32_t lfs_mount() {
 	// possible there is a committed file of the same name since we commit file before delete migrating
 	else if (scan_result.migrating && !scan_result.reserved) {
 		char *filename = (char *) scan_result.migrating + sizeof(struct fs_rec_header);
+
 		struct fs_rec_header *found_file = find_file_name(filename);
 
 		// if we find a committed file of the same name, there is no need to do anything
@@ -830,8 +889,49 @@ uint32_t lfs_mount() {
 			return FS_EFLASH;
 	}
 
-	printf("head = 0x%lx\n", (uint64_t) fs_head);
-	printf("tail = 0x%lx\n", (uint64_t) fs_tail);
+	// crash in the middle adding a new file (not overwriting/modifying existing file)
+	// or adding wear marker (happens after the main file is committed)
+	// it should be the "tail"/last header, since files are appended there
+	else if (!scan_result.migrating && scan_result.reserved && scan_result.reserved == cur_header) {
+		// as with some other cases: handling depends on where specifically we crash
+		// and we can crash while or before writing the filename, or while writing data
+		struct fs_rec_header *reserved = scan_result.reserved;
+		uint32_t reserved_filename_len = 0;
+		char *reserved_filename = (char *) reserved + sizeof(struct fs_rec_header);
+		for (uint32_t i = 0; i < 64; i++) {
+			if (reserved_filename[i] == 0)
+				break;
+			reserved_filename_len++;
+		}
+
+		// full filename with null terminator => data_len is completely written
+		if (reserved_filename_len != 64) {
+			if (change_file_status(reserved, STATUS_DELETED))
+				return FS_EFLASH;
+			fs_tail += sizeof(struct fs_rec_header) + reserved_filename_len + 1;
+			fs_tail = align_up_32(fs_tail, FS_DATA_ALIGN);
+			fs_tail += reserved->data_len;
+			fs_tail = align_up_32(fs_tail, FS_HEADER_ALIGN);
+		}
+		else {
+			uint8_t zero = 0;
+			uint32_t terminate_position = (uint64_t) scan_result.reserved - (uint64_t) flash_mmap;
+			// pretend the file name was supposed to be 63, which is the longest allowed
+			terminate_position += sizeof(struct fs_rec_header) + 63;
+
+			if (change_file_data_len(cur_header, 0))
+				return FS_EFLASH;
+			if (flash_write(flash_mmap, &zero, terminate_position, 1))
+				return FS_EFLASH;
+			if (change_file_status(reserved, STATUS_DELETED))
+				return FS_EFLASH;
+
+			fs_tail = align_up_32(terminate_position + 1, FS_HEADER_ALIGN);
+		}
+	}
+
+	PRINTF("head = 0x%lx\n", (uint64_t) fs_head);
+	PRINTF("tail = 0x%lx\n", (uint64_t) fs_tail);
 
 	// if we find wear marker, need to perform wear leveling
 	if (wear_marker) {
@@ -839,8 +939,8 @@ uint32_t lfs_mount() {
 		if (code != FS_SUCCESS)
 			return code;
 
-		printf("new head = 0x%lx\n", (uint64_t) fs_head);
-		printf("new tail = 0x%lx\n", (uint64_t) fs_tail);
+		PRINTF("new head = 0x%lx\n", (uint64_t) fs_head);
+		PRINTF("new tail = 0x%lx\n", (uint64_t) fs_tail);
 	}
 
 	return FS_SUCCESS;
@@ -885,10 +985,16 @@ uint32_t fd_list_add(struct fs_file_descriptor fd) {
 	return fd_list_size - 1;
 }
 
+uint32_t vfs_open_errno() {
+	return vfs_open_error;
+}
+
 uint32_t vfs_open(const char *name, int flags) {
 	uint32_t filename_len = strlen(name);
-	if (filename_len > FS_MAX_FILENAME_LEN)
+	if (filename_len > FS_MAX_FILENAME_LEN) {
+		vfs_open_error = FS_EINVAL;
 		return -1;
+	}
 
 	struct fs_rec_header *file_found = find_file_name(name);
 
@@ -898,18 +1004,27 @@ uint32_t vfs_open(const char *name, int flags) {
 	};
 
 	if (!file_found) {
-		if ((flags & FS_CREATE) != FS_CREATE)
+		if ((flags & FS_CREATE) != FS_CREATE) {
+			vfs_open_error = FS_ENOENT;
 			return -1;
+		}
 		uint32_t code = append_file(name, &fd.offset, NULL, 0, STATUS_COMMITTED, true);
-		if (code != FS_SUCCESS)
+		if (code != FS_SUCCESS) {
+			vfs_open_error = code;
 			return -1;
+		}
 		file_found = (struct fs_rec_header *) (flash_mmap + fd.offset);
 	}
 
 	fd.offset = (uint64_t) file_found - (uint64_t) flash_mmap;
 
 	uint32_t fd_index = fd_list_add(fd);
-	return fd_index == UINT32_MAX ? 0 : fd_index + 1;
+	if (fd_index == UINT32_MAX) {
+		vfs_open_error = FS_EUNKNOWN;
+		return -1;
+	}
+
+	return fd_index + 1;
 }
 
 uint32_t vfs_close(uint32_t fd) {

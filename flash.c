@@ -10,12 +10,12 @@
 
 jmp_buf lfs_mount_jmp_buf;
 
-uint32_t write_moves_remaining = UINT32_MAX;
-uint32_t erase_moves_remaining = UINT32_MAX;
+uint32_t write_moves_remaining = 0;
+uint32_t erase_moves_remaining = 0;
 
 void flash_set_crash(uint32_t write_min, uint32_t write_max, uint32_t erase_min, uint32_t erase_max) {
-	write_moves_remaining = RANDOM_NUMBER(write_min, write_max);
-	erase_moves_remaining = RANDOM_NUMBER(erase_min, erase_max);
+	write_moves_remaining = RANDOM_NUMBER(write_min, write_max) + 1;
+	erase_moves_remaining = RANDOM_NUMBER(erase_min, erase_max) + 1;
 }
 
 uint32_t flash_get_total_size() {
@@ -28,11 +28,11 @@ uint32_t flash_get_sector_size() {
 // return 1 = trying to write unerased flash (i.e. 0 to 1)
 int flash_write(uint8_t *mmap, const void *buffer, uint32_t address, uint32_t length) {
 	if (address >= flash_get_total_size()) {
-		printf("out of bounds: %u\n", address);
+		PRINTF("out of bounds: %u\n", address);
 		return FLASH_OUT_OF_BOUNDS;
 	}
 
-	// printf("flash: writing %u bytes to 0x%x\n", length, address);
+	// PRINTF("flash: writing %u bytes to 0x%x\n", length, address);
 
 	// check if operation is legal (no changing 0 to 1)
 	uint8_t *write = (uint8_t *) buffer;
@@ -40,19 +40,17 @@ int flash_write(uint8_t *mmap, const void *buffer, uint32_t address, uint32_t le
 		uint8_t current = mmap[address + i];
 		uint8_t byte = write[i] | current;
 		if (byte ^ current) {
-			printf("FLASH WRITE FAILED: address 0x%x\n", address);
+			PRINTF("FLASH WRITE FAILED: address 0x%x\n", address);
 			return 1;
 		}
 	}
 
 #ifdef CRASH_INJECT
 	for (uint32_t i = 0; i < length; i++) {
-		if (write_moves_remaining-- == 0) {
-			printf("WRITE CRASH\n");
-			printf("call: write len %u to address 0x%x\n", length, address);
-			printf("crash before writing 0x%x to 0x%x\n", write[i], address + i);
-			if (i >= 1)
-				printf("successfully wrote [%x %x] to 0x%x\n", write[i - 2], write[i - 1], address + i - 2);
+		if (write_moves_remaining != 0 && write_moves_remaining-- == 1) {
+			PRINTF("WRITE CRASH\n");
+			PRINTF("call: write len %u to address 0x%x\n", length, address);
+			PRINTF("crash before writing 0x%x to 0x%x\n", write[i], address + i);
 			longjmp(lfs_mount_jmp_buf, 1);
 		}
 		*(mmap + address + i) = write[i];
@@ -74,7 +72,7 @@ int flash_erase_region(uint8_t *mmap, uint32_t start, uint32_t len) {
 
 #ifdef CRASH_INJECT
 	for (uint32_t i = 0; i < len; i++) {
-		if (erase_moves_remaining-- == 0)
+		if (erase_moves_remaining != 0 && erase_moves_remaining-- == 1)
 			longjmp(lfs_mount_jmp_buf, 1);
 		*(mmap + start + i) = 0xFF;
 	}

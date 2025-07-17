@@ -70,6 +70,7 @@ uint32_t lfs_set_file(int fd);
 uint32_t lfs_unmount();
 uint32_t lfs_mount();
 
+uint32_t vfs_open_errno();
 uint32_t vfs_open(const char *name, int flags);
 uint32_t vfs_close(uint32_t fd);
 uint32_t vfs_write(uint32_t fd, void *buffer, uint32_t len);

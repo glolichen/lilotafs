@@ -6,10 +6,10 @@ SECTOR_SIZE = 4096
 
 CC=gcc
 CFLAGS=-I. -D TOTAL_SIZE=$(TOTAL_SIZE) -D SECTOR_SIZE=$(SECTOR_SIZE) \
-	   -Wall -Wextra -fsanitize=undefined -static-libasan -g
+	   -Wall -Wextra -fsanitize=undefined -static-libasan -g -O3
 OBJ = lilotaFS.o flash.o
 
-all: test torture
+all: clean test torture
 
 test: $(OBJ) test.o
 	$(CC) -o test $^ $(CFLAGS)
