@@ -1,15 +1,17 @@
 import os
+import sys
 import random
 
 PRINT_EVERY = 10
 REPEATS = 100000
 
 def main():
+    disk = sys.argv[1]
     text = ""
     for i in range(REPEATS):
         seed = random.randrange(0, 1 << 31)
-        os.system("make new_disk > /dev/null 2> /dev/null")
-        code = os.system(f"./torture disk.bin {seed} > /dev/null")
+        os.system(f"(dd if=/dev/zero bs=2M count=1 | tr '\\000' '\\377' > {disk}) > /dev/null 2> /dev/null")
+        code = os.system(f"./torture {disk} {seed} > /dev/null")
         if code != 0:
             print(f"problem {seed}")
 

@@ -51,7 +51,7 @@ enum fs_record_status {
 
 enum fs_magic {
 	FS_RECORD = 0x5AA5,
-	FS_WRAP_MARKER = 0xFAFA,
+	FS_WRAP_MARKER = 0x5AFA,
 	FS_START = 0x5A00,
 	FS_START_CLEAN = 0x5AA0
 };

@@ -9,7 +9,7 @@ CFLAGS=-I. -D TOTAL_SIZE=$(TOTAL_SIZE) -D SECTOR_SIZE=$(SECTOR_SIZE) \
 		-Wall -Wextra -static-libasan -g -O3 \
 		-fsanitize=address,undefined 
 
-OBJ = lilotaFS.o flash.o
+OBJ = lilotaFS.o flash.o torture_util.o
 
 all: clean test torture
 
@@ -18,10 +18,6 @@ test: $(OBJ) test.o
 
 torture: $(OBJ) torture.o
 	$(CC) -o torture $^ $(CFLAGS)
-
-# gen_test: $(OBJ) gen_test_disk.o
-# 	dd if=/dev/zero bs=$(TOTAL_SIZE) count=1 | tr '\000' '\377' > disk.bin
-# 	$(CC) -o gen_test_disk $^ $(CFLAGS)
 
 %.o: %.c
 	$(CC) -c -o $@ $< $(CFLAGS)

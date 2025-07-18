@@ -34,7 +34,7 @@ uint32_t u32_max(uint32_t a, uint32_t b) {
 
 struct fs_rec_header *scan_for_header(uint32_t start, uint32_t partition_size) {
 	start = align_up_32(start, FS_HEADER_ALIGN);
-	for (uint32_t i = start; i < partition_size - sizeof(struct fs_rec_header); i += FS_HEADER_ALIGN) {
+	for (uint32_t i = start; i <= partition_size - sizeof(struct fs_rec_header); i += FS_HEADER_ALIGN) {
 		struct fs_rec_header *header = (struct fs_rec_header *) (flash_mmap + i);
 		if (header->magic == FS_START || header->magic == FS_START_CLEAN)
 			return header;
@@ -82,7 +82,7 @@ struct fs_rec_header *process_advance_header(struct fs_rec_header *cur_header, u
 	// the wrap marker magic is FA FA, it's possible we crash between writing these bytes
 	// resulting in FA FF, so we'll read the first byte
 	// since the two bytes of FA FA are equal, this will work on little and big endian
-	if (*((uint8_t *) cur_header + offsetof(struct fs_rec_header, magic)) == 0xFA || cur_header->status == STATUS_WRAP_MARKER) {
+	if (cur_header->magic == FS_WRAP_MARKER || cur_header->status == STATUS_WRAP_MARKER) {
 		// if we crash while writing the data_len field of the wrap marker
 		if (cur_header->data_len != 0) {
 			if (change_file_magic(cur_header, FS_WRAP_MARKER))
@@ -402,7 +402,7 @@ uint32_t remove_false_magic(uint8_t *start, uint32_t size) {
 }
 
 uint32_t clobber_file_data(struct fs_rec_header *file) {
-	if (*((uint8_t *) file + offsetof(struct fs_rec_header, magic)) == 0xFA || file->status == STATUS_WRAP_MARKER)
+	if (file->magic == FS_WRAP_MARKER || file->status == STATUS_WRAP_MARKER)
 		return FS_SUCCESS;
 
 	char *filename = (char *) file + sizeof(struct fs_rec_header);
