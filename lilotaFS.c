@@ -164,7 +164,11 @@ struct scan_headers_result {
 			ret.wrap_marker = cur_header;
 		if (cur_header->status == STATUS_MIGRATING)
 			ret.migrating = cur_header;
-		if (cur_header->status == STATUS_RESERVED) {
+
+		// weird edge case: if the cur_header has status FF
+		// becuse of a crash after writing magic but before writing reserved status
+		// treat it like reserved
+		if (cur_header->status == STATUS_RESERVED || cur_header->status == 0xFF) {
 			ret.reserved = cur_header;
 			break;
 		}
@@ -600,7 +604,15 @@ uint32_t lfs_mount() {
 	uint32_t num_files = 0;
 
 	// if position 0 is an normal file, not the head, or there is nothing there
-	// or it is FS_START_CLEAN
+	// if it is FS_START_CLEAN, we must check if there is an FS_START
+	// if the last thing processed before the crash is a wrap marker
+	// we may crash before or after the 00 5A (FS_START) of the wrap marker is erased
+	// so we need to see whether we can find an FS_START that is the wrap marker
+	// and if we can, deal with that
+	// see wear_level_compact, and observe that before we start erasing the sector
+	// containing the wrap marker (FS_START), we clobber the file info and remove
+	// false magics of all files before the wrap marker
+	// so we can advance to the tail and search for headers from there
 	if (cur_header->magic != FS_START) {
 		// follow current file until no more
 		// (if no file at 0 this will return cur_header immediately, then offset = 0)
@@ -624,7 +636,7 @@ uint32_t lfs_mount() {
 		// (we deal with this crash again later on)
 
 		uint32_t offset = (uint64_t) cur_header - (uint64_t) flash_mmap;
-		if (cur_header == scan_result.reserved && cur_header->status == STATUS_RESERVED) {
+		if (cur_header == scan_result.reserved && (cur_header->status == STATUS_RESERVED || cur_header->status == 0xFF)) {
 			uint32_t reserved_filename_len = 0;
 			char *reserved_filename = (char *) scan_result.reserved + sizeof(struct fs_rec_header);
 			for (uint32_t i = 0; i < 64; i++) {
@@ -647,6 +659,13 @@ uint32_t lfs_mount() {
 
 		// scan disk 1 byte at a time until we find FS_START magic
 		cur_header = scan_for_header(offset, partition_size);
+
+		// if cur_header is NULL: no FS_START
+		// if offset 0 is FS_START_CLEAN, then this is the result of the crash described earlier
+		// if not, we need to write a FS_START
+		// (merely setting cur_header to 0 is enough, as this case is handled later)
+		if (!cur_header && ((struct fs_rec_header *) flash_mmap)->magic == FS_START_CLEAN)
+			cur_header = (struct fs_rec_header *) flash_mmap;
 	}
 
 	// if none found, write a FS_START header at 0

@@ -1,4 +1,3 @@
-#include <linux/limits.h>
 #include <string.h>
 #include <stdint.h>
 #include <setjmp.h>
@@ -15,67 +14,94 @@ extern jmp_buf lfs_mount_jmp_buf;
 
 struct table_entry {
 	char *filename;
+	uint32_t content_size;
 	uint8_t *content;
-	uint8_t *alternate_content;
 };
 
+uint32_t alternate_content_file = UINT32_MAX;
+uint32_t alternate_content_size = 0; 
+uint8_t *alternate_content = NULL;
+
+// returns the number of files that are wrong
 uint32_t inspect_fs(struct table_entry *files) {
-	PRINTF("========== INSPECT ==========\n");
-	uint32_t wrong_count = 0;
+	uint32_t total_wrong = 0;
 	for (uint32_t i = 0; i < FILE_COUNT; i++) {
-		struct table_entry *entry = &files[i];
-		if (!entry->content) {
-			PRINTF("NOTE: %.63s (%u) empty\n", entry->filename, i);
+		char *filename = files[i].filename;
+
+		uint32_t fd = vfs_open(filename, FS_READABLE | FS_WRITABLE);
+		if (fd == (uint32_t) -1) {
+			PRINTF("inspect: file %s: can't open\n", filename);
+			total_wrong++;
 			continue;
 		}
-		uint32_t fd = vfs_open(entry->filename, FS_READABLE | FS_WRITABLE);
-		if (fd == UINT32_MAX) {
-			PRINTF("WRONG: %.63s (%u) -- fd == -1, error %u\n", entry->filename, i, vfs_open_errno());
-			wrong_count++;
+
+		uint32_t actual_size = vfs_get_size(fd);
+		uint8_t *file_content = (uint8_t *) calloc(actual_size, sizeof(uint8_t));
+		if (!file_content) {
+			PRINTF("inspect: file %s: malloc fail\n", filename);
+			total_wrong++;
 			continue;
 		}
-		uint32_t size = vfs_get_size(fd);
-		uint8_t *file_content = (uint8_t *) malloc(size);
-		if (file_content == NULL) {
-			PRINTF("WRONG: %.63s (%u) -- malloc fail\n", entry->filename, i);
-			wrong_count++;
-			vfs_close(fd);
-			continue;
-		}
-		if (vfs_read(fd, file_content, 0, size) != FS_SUCCESS) {
-			PRINTF("WRONG: %.63s (%u) -- read fail\n", entry->filename, i);
-			wrong_count++;
+
+		uint32_t code = vfs_read(fd, file_content, 0, actual_size);
+		if (code != FS_SUCCESS) {
+			PRINTF("inspect: file %s: read fail\n", filename);
+			total_wrong++;
 			free(file_content);
-			vfs_close(fd);
 			continue;
 		}
-		bool wrong = false;
-		uint32_t normal = memcmp(file_content, entry->content, size);
-		if (entry->alternate_content != NULL) {
-			uint32_t alternate = memcmp(file_content, entry->alternate_content, size);
-			if (normal != 0 && alternate == 0) {
-				free(entry->content);
-				entry->content = entry->alternate_content;
-				entry->alternate_content = 0;
+
+
+		if (alternate_content_file == i) {
+			if (actual_size == files[i].content_size) {
+				if (actual_size != 0) {
+					uint32_t cmp = memcmp(file_content, files[i].content, actual_size);
+					if (cmp != 0) {
+						PRINTF("inspect: file %s: content wrong\n", filename);
+						total_wrong++;
+					}
+				}
+			}
+			else if (actual_size == alternate_content_size) {
+				if (actual_size != 0) {
+					uint32_t cmp = memcmp(file_content, alternate_content, actual_size);
+					if (cmp != 0) {
+						PRINTF("inspect: file %s: content wrong\n", filename);
+						total_wrong++;
+						free(file_content);
+						continue;
+					}
+					files[i].content_size = actual_size;
+					files[i].content = (uint8_t *) realloc(files[i].content, actual_size);
+					memcpy(files[i].content, alternate_content, actual_size);
+				}
+			}
+			else {
+				PRINTF("inspect: file %s: size wrong: got %u, expected %u or %u\n",
+						filename, actual_size, files[i].content_size, alternate_content_size);
+				total_wrong++;
 			}
 		}
-		free(file_content);
-		vfs_close(fd);
-		if (wrong) {
-			PRINTF("WRONG: %.63s (%u) -- content wrong\n", entry->filename, i);
-			wrong_count++;
-			continue;
+		else {
+			if (actual_size != files[i].content_size) {
+				PRINTF("inspect: file %s: size wrong: got %u, expected %u\n", filename, actual_size, files[i].content_size);
+				total_wrong++;
+				free(file_content);
+				continue;
+			}
+			if (actual_size != 0) {
+				uint32_t cmp = memcmp(file_content, files[i].content, actual_size);
+				if (cmp != 0) {
+					PRINTF("inspect: file %s: content wrong\n", filename);
+					total_wrong++;
+				}
+			}
 		}
-		PRINTF("CORRECT: %.63s (%u)\n", entry->filename, i);
+
+		free(file_content);
 	}
 
-	uint32_t file_count = lfs_count_files();
-	if (file_count != FILE_COUNT)
-		PRINTF("# of files wrong: LFS reports %u\n", file_count);
-
-	PRINTF("========== INSPECT OVER ==========\n");
-
-	return wrong_count;
+	return total_wrong;
 }
 
 int main(int argc, char *argv[]) {
@@ -83,8 +109,6 @@ int main(int argc, char *argv[]) {
 		PRINTF("error: must enter arguments\n");
 		return 1;
 	}
-
-	PRINTF("total size %d, sector size %d\n", TOTAL_SIZE, SECTOR_SIZE);
 
 	char *disk_name = argv[1];
 	int disk = open(disk_name, O_RDWR);
@@ -103,176 +127,184 @@ int main(int argc, char *argv[]) {
 	PRINTF("mount: %u\n", lfs_mount());
 
 	struct table_entry files[FILE_COUNT];
-	memset(files, 0, sizeof(files));
 	uint32_t fds[FILE_COUNT];
+	memset(files, 0, sizeof(files));
+	memset(fds, 0, sizeof(fds));
 
-	for (uint32_t file = 0; file < FILE_COUNT; file++) {
+	for (uint32_t i = 0; i < FILE_COUNT; i++) {
 		uint32_t filename_len = RANDOM_NUMBER(10, 63);
+		files[i].filename = (char *) malloc(filename_len + 1);
+		for (uint32_t j = 0; j < filename_len; j++)
+			files[i].filename[j] = RANDOM_NUMBER(33, 126);
+		files[i].filename[filename_len] = 0;
 
-		struct table_entry entry = {
-			.filename = (char *) calloc(filename_len + 1, sizeof(char)),
-			.content = NULL,
-			.alternate_content = NULL
-		};
-		for (uint32_t i = 0; i < filename_len; i++)
-			entry.filename[i] = RANDOM_NUMBER(33, 126);
-		files[file] = entry;
+		files[i].content_size = 0;
+		files[i].content = NULL;
 
-		fds[file] = vfs_open(entry.filename, FS_WRITABLE | FS_READABLE | FS_CREATE);
-		if (fds[file] == (uint32_t) -1) {
-			PRINTF("open failed: %u\n", vfs_open_errno());
-			goto cleanup;
+		uint32_t fd = vfs_open(files[i].filename, FS_WRITABLE | FS_READABLE | FS_CREATE);
+		if (fd == (uint32_t) -1) {
+			PRINTF("populate: file %s: can't open\n", files[i].filename);
+			return 1;
 		}
-		
-		PRINTF("file %u = %.63s\n", file, entry.filename);
+		fds[i] = fd;
 	}
 
-	static bool has_set_jmp = false;
-	static uint32_t total_wrong = 0, error_code = 0;
-	for (static uint32_t op = 0; op < OP_COUNT; op++) {
+	flash_set_crash(CRASH_WRITE_MIN_MOVES, CRASH_WRITE_MAX_MOVES, CRASH_ERASE_MIN_MOVES, CRASH_ERASE_MAX_MOVES);
+
+	uint32_t total_wrong = 0, error_code = 0;
+	for (uint32_t op = 0; op < OP_COUNT; op++) {
 		uint32_t file = RANDOM_NUMBER(0, FILE_COUNT - 1);
-		struct table_entry *entry = &files[file];
+		uint32_t fd = fds[file];
 
-		PRINTF("op #%u\n", op);
-
-		uint32_t size = RANDOM_NUMBER(MIN_SIZE, MAX_SIZE);
-		uint8_t *random = (uint8_t *) malloc(size);
+		uint32_t random_size = RANDOM_NUMBER(MIN_SIZE, MAX_SIZE);
+		uint8_t *random = (uint8_t *) malloc(random_size);
 		if (!random) {
-			fprintf(stderr, "malloc failed\n");
+			PRINTF("main loop: file %s: malloc fail\n", files[file].filename);
+			error_code = 1;
 			goto cleanup;
 		}
 
-		for (uint32_t i = 0; i < size; i++)
+		for (uint32_t i = 0; i < random_size; i++)
 			random[i] = RANDOM_NUMBER(0, 255);
 
-		uint32_t code = vfs_write(fds[file], random, size);
-		if (setjmp(lfs_mount_jmp_buf)) {
+		PRINTF("main loop: step %u: random = %p\n", op, random);
+
+		uint32_t code;
+		if (setjmp(lfs_mount_jmp_buf) == 0)
+			code = vfs_write(fd, random, random_size);
+		else {
 			// simulated crash will long jump back to here
 			// simulate computer restart by unmounting and remounting
 			PRINTF("\n\n=============== SIMULATED CRASH ===============\n");
+			PRINTF("crash inject: random = %p\n", random);
+
 			flash_set_crash(CRASH_WRITE_MIN_MOVES, CRASH_WRITE_MAX_MOVES, CRASH_ERASE_MIN_MOVES, CRASH_ERASE_MAX_MOVES);
 
 			lfs_unmount();
 			lfs_set_file(disk);
 			lfs_mount();
 
-			for (uint32_t file = 0; file < FILE_COUNT; file++) {
-				struct table_entry entry2 = files[file];
-				fds[file] = vfs_open(entry2.filename, FS_WRITABLE | FS_READABLE | FS_CREATE);
-				if (fds[file] == (uint32_t) (-1)) {
+			for (uint32_t i = 0; i < FILE_COUNT; i++) {
+				uint32_t fd = vfs_open(files[i].filename, FS_WRITABLE | FS_READABLE | FS_CREATE);
+				if (fd == (uint32_t) -1) {
+					PRINTF("crash inject: file %s: can't open\n", files[i].filename);
 					error_code = vfs_open_errno();
-					PRINTF("error opening %s\n", entry2.filename);
-					free(random);
 					goto cleanup;
 				}
-				PRINTF("file %u = %.63s\n", file, entry2.filename);
-			};
+				fds[i] = fd;
+			}
 
-			entry->alternate_content = random;
-			PRINTF("inspection: %u\n", inspect_fs(files));
-			entry->alternate_content = NULL;
-			if (entry->content != random)
-				free(random);
+			alternate_content_file = file;
+			alternate_content_size = random_size; 
+			alternate_content = random;
 
-			PRINTF("=============== RECOVERED FROM CRASH ===============\n\n");
+			uint32_t wrong = inspect_fs(files);
+			total_wrong += wrong;
+			PRINTF("post crash inspect: %u\n", wrong);
+
+			alternate_content_file = UINT32_MAX;
+			alternate_content_size = 0; 
+			alternate_content = NULL;
+
+			free(random);
+
+			// entry->alternate_content = NULL;
+			// entry->alternate_content_size = 0;
+			// if (entry->content != random)
+			// 	FREE(random);
+			//
+			// printf("=============== RECOVERED FROM CRASH ===============\n\n");
 
 			continue;
 			// exit(1);
 		}
-		if (!has_set_jmp) {
-			has_set_jmp = true;
-			flash_set_crash(CRASH_WRITE_MIN_MOVES, CRASH_WRITE_MAX_MOVES, CRASH_ERASE_MIN_MOVES, CRASH_ERASE_MAX_MOVES);
-		}
+
+
+
 		if (code == FS_SUCCESS) {
-			if (entry->content)
-				FREE(entry->content);
-			entry->content = random;
+			files[file].content_size = random_size;
+			files[file].content = (uint8_t *) realloc(files[file].content, random_size);
+			memcpy(files[file].content, random, random_size);
+			PRINTF("main loop: file %s, step %u: write %u bytes\n", files[file].filename, op, random_size);
 		}
 
-		if (code != FS_SUCCESS && code != FS_ENOSPC) {
-			FREE(random);
-			PRINTF("write error: %u\n", code);
-			error_code = code;
-			goto cleanup;
-		}
-
-#ifdef OPS_PER_REMOUNT
-		if (code == FS_ENOSPC || (op % OPS_PER_REMOUNT == 0 && op != 0)) {
-#else
-		if (code == FS_ENOSPC) {
-			PRINTF("no space, inspect: %u\n", inspect_fs(files));
-			exit(1);
-#endif
+		if (code == FS_ENOSPC || (code == FS_SUCCESS && op % OPS_PER_REMOUNT == 0 && op != 0)) {
 			PRINTF("\n\n=============== UNMOUNT/REMOUNT ===============\n");
-			if (code == FS_SUCCESS) {
-				uint32_t wrong = inspect_fs(files);
-				total_wrong += wrong;
-				if (wrong != 0) {
-					;
-				}
-				PRINTF("before unmount inspect: %u\n", wrong);
-			}
-			else
-				PRINTF("out of space!\n");
 
-			PRINTF("\nunmount: %u\n", lfs_unmount());
-			lfs_set_file(disk);
-			uint32_t mount_code = lfs_mount();
-			if (mount_code != FS_SUCCESS) {
-				PRINTF("mount error: %u\n", code);
-				error_code = code;
+			uint32_t remount_code = lfs_unmount();
+			if (remount_code != FS_SUCCESS) {
+				PRINTF("wear level: file %s: unmount error %u\n", files[file].filename, remount_code);
+				error_code = remount_code;
+				free(random);
 				goto cleanup;
 			}
 
-			for (uint32_t file = 0; file < FILE_COUNT; file++) {
-				struct table_entry entry = files[file];
-				fds[file] = vfs_open(entry.filename, FS_WRITABLE | FS_READABLE | FS_CREATE);
-				if (fds[file] == (uint32_t) (-1)) {
+			lfs_set_file(disk);
+
+			remount_code = lfs_mount();
+			if (remount_code != FS_SUCCESS) {
+				PRINTF("wear level: file %s: unmount error %u\n", files[file].filename, remount_code);
+				error_code = remount_code;
+				free(random);
+				goto cleanup;
+			}
+
+			for (uint32_t i = 0; i < FILE_COUNT; i++) {
+				uint32_t fd = vfs_open(files[i].filename, FS_WRITABLE | FS_READABLE | FS_CREATE);
+				if (fd == (uint32_t) -1) {
+					PRINTF("wear level: file %s: can't open\n", files[i].filename);
 					error_code = vfs_open_errno();
-					PRINTF("error opening %s\n", entry.filename);
 					free(random);
 					goto cleanup;
 				}
+				fds[i] = fd;
 			}
 
 			uint32_t wrong = inspect_fs(files);
 			total_wrong += wrong;
-			if (wrong != 0) {
-				;
-			}
-			PRINTF("after unmount inspect: %u\n", wrong);
+			PRINTF("after mount inspect: %u\n", wrong);
+
 			PRINTF("=============== UNMOUNT/REMOUNT OVER ===============\n\n");
 		}
+		
+		if (code != FS_SUCCESS && code != FS_ENOSPC) {
+			PRINTF("main loop: file %s: error %u\n", files[file].filename, code);
+			error_code = code;
+			free(random);
+			goto cleanup;
+		}
+
+		free(random);
 	}
 
-	if (error_code == 0) {
-		uint32_t wrong = inspect_fs(files);
-		total_wrong += wrong;
-		printf("final inspect: %u\n", wrong);
-	}
+	uint32_t wrong = inspect_fs(files);
+	PRINTF("final inspect: %u\n", wrong);
+	total_wrong += wrong;
+
+	PRINTF("FINAL WRONG TOTAL: %u\n", total_wrong);
+	PRINTF("SEED: %lu\n", seed);
 
 cleanup:
 	for (uint32_t i = 0; i < FILE_COUNT; i++) {
-		if (files[i].filename)
-			free(files[i].filename);
+		free(files[i].filename);
 		if (files[i].content)
 			free(files[i].content);
 	}
 
 	lfs_unmount();
 
-	if (total_wrong == 0 && error_code == 0)
+	if (!error_code && !total_wrong)
 		return 0;
 
-	// if (total_wrong == 0 && error_code == FS_ENOSPC)
-	// 	return 0;
-
-	if (error_code == 0) {
-		fprintf(stderr, "\nseed %ld, wrong %u\n", seed, total_wrong);
-		return total_wrong == 0 ? 0 : 1;
+	fprintf(stderr, "SEED: %lu\n", seed);
+	if (error_code) {
+		fprintf(stderr, "ERROR CODE: %u\n", error_code);
+		return 1;
 	}
-
-	fprintf(stderr, "\nseed %ld, error code %u\n", seed, error_code);
-	return error_code ? 0 : 1;
+	if (total_wrong) {
+		fprintf(stderr, "FINAL WRONG TOTAL: %u\n", total_wrong);
+		return 1;
+	}
 }
+
 

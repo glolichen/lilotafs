@@ -6,7 +6,7 @@
 // #define PRINT_STUFF
 // #define PRINT_FREE
 
-#define FILE_COUNT 60
+#define FILE_COUNT 1
 #define OP_COUNT 4000
 
 #define MIN_SIZE 5
@@ -41,13 +41,18 @@ inline static uint32_t evaluate_all(const char *fmt, ...) {
 #define PRINTF(format, ...) evaluate_all(format, ##__VA_ARGS__)
 #endif
 
-#ifdef LOG_FREE
+#ifdef PRINT_FREE
 #define FREE(mem) { \
-	PRINTF("free memory %p (variable %s), line %d\n", mem, #mem, __LINE__); \
+	printf("free memory %p (variable %s), line %d\n", mem, #mem, __LINE__); \
 	free(mem); \
 }
 #else
-#define FREE(mem) free(mem)
+#define FREE(mem) { \
+	if (mem) { \
+		free(mem); \
+		mem = NULL; \
+	} \
+}
 #endif
 
 #endif

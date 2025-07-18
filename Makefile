@@ -4,9 +4,11 @@ TOTAL_SIZE = 2097152
 # 4 KiB
 SECTOR_SIZE = 4096
 
-CC=gcc
+CC=clang
 CFLAGS=-I. -D TOTAL_SIZE=$(TOTAL_SIZE) -D SECTOR_SIZE=$(SECTOR_SIZE) \
-	   -Wall -Wextra -fsanitize=undefined -static-libasan -g -O3
+		-Wall -Wextra -static-libasan -g -O3 \
+		-fsanitize=address,undefined 
+
 OBJ = lilotaFS.o flash.o
 
 all: clean test torture
