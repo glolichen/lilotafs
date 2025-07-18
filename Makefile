@@ -5,9 +5,8 @@ TOTAL_SIZE = 2097152
 SECTOR_SIZE = 4096
 
 CC=clang
-CFLAGS=-I. -D TOTAL_SIZE=$(TOTAL_SIZE) -D SECTOR_SIZE=$(SECTOR_SIZE) \
-		-Wall -Wextra -static-libasan -g -O3 \
-		-fsanitize=address,undefined 
+CFLAGS=-I. -D TOTAL_SIZE=$(TOTAL_SIZE) -D SECTOR_SIZE=$(SECTOR_SIZE) -Wall -Wextra -g -O3 \
+		-fsanitize=address,undefined -static-libasan
 
 OBJ = lilotaFS.o flash.o torture_util.o
 

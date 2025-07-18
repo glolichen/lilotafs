@@ -56,10 +56,20 @@ enum fs_magic {
 	FS_START_CLEAN = 0x5AA0
 };
 
+struct fs_context {
+	uint8_t *flash_mmap;
+	uint32_t fs_head, fs_tail;
+	uint32_t largest_file_size, largest_filename_len;
+	bool has_wear_marker;
+	uint32_t vfs_open_error;
+	uint32_t fd_list_size, fd_list_capacity;
+	struct fs_file_descriptor *fd_list;
+};
+
 struct fs_rec_header {
-	uint16_t magic; // See §3.4
-	uint8_t status; // See §3.5
-	uint32_t data_len; // Length of the Data field.
+	uint16_t magic;
+	uint8_t status;
+	uint32_t data_len;
 };
 
 struct fs_file_descriptor {
@@ -67,24 +77,24 @@ struct fs_file_descriptor {
 	uint32_t offset;
 };
 
-uint32_t lfs_set_file(int fd);
-uint32_t lfs_unmount();
-uint32_t lfs_mount();
+uint32_t lfs_set_file(struct fs_context *ctx, int fd);
+uint32_t lfs_unmount(struct fs_context *ctx);
+uint32_t lfs_mount(struct fs_context *ctx);
 
-uint32_t vfs_open_errno();
-uint32_t vfs_open(const char *name, int flags);
-uint32_t vfs_close(uint32_t fd);
-uint32_t vfs_write(uint32_t fd, void *buffer, uint32_t len);
-uint32_t vfs_get_size(uint32_t fd);
-uint32_t vfs_read(uint32_t fd, void *buffer, uint32_t addr, uint32_t len);
-uint32_t vfs_delete(uint32_t fd);
+uint32_t vfs_open_errno(struct fs_context *ctx);
+uint32_t vfs_open(struct fs_context *ctx, const char *name, int flags);
+uint32_t vfs_close(struct fs_context *ctx, uint32_t fd);
+uint32_t vfs_write(struct fs_context *ctx, uint32_t fd, void *buffer, uint32_t len);
+uint32_t vfs_get_size(struct fs_context *ctx, uint32_t fd);
+uint32_t vfs_read(struct fs_context *ctx, uint32_t fd, void *buffer, uint32_t addr, uint32_t len);
+uint32_t vfs_delete(struct fs_context *ctx, uint32_t fd);
 
-uint32_t lfs_count_files();
+uint32_t lfs_count_files(struct fs_context *ctx);
 
-uint32_t lfs_get_largest_file_size();
-uint32_t lfs_get_largest_filename_len();
-uint32_t lfs_get_head();
-uint32_t lfs_get_tail();
+uint32_t lfs_get_largest_file_size(struct fs_context *ctx);
+uint32_t lfs_get_largest_filename_len(struct fs_context *ctx);
+uint32_t lfs_get_head(struct fs_context *ctx);
+uint32_t lfs_get_tail(struct fs_context *ctx);
 
 #endif 
 
