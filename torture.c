@@ -167,9 +167,12 @@ int main(int argc, char *argv[]) {
 		for (uint32_t i = 0; i < random_size; i++)
 			random[i] = RANDOM_NUMBER(0, 255);
 
-		PRINTF("main loop: step %u: random = %p\n", op, random);
-
 		uint32_t code;
+		PRINTF("main loop: step %u\n", op);
+
+		if (op == 431)
+			printf("\n");
+
 		if (setjmp(lfs_mount_jmp_buf) == 0)
 			code = vfs_write(fd, random, random_size);
 		else {
@@ -208,12 +211,7 @@ int main(int argc, char *argv[]) {
 
 			free(random);
 
-			// entry->alternate_content = NULL;
-			// entry->alternate_content_size = 0;
-			// if (entry->content != random)
-			// 	FREE(random);
-			//
-			// printf("=============== RECOVERED FROM CRASH ===============\n\n");
+			printf("=============== RECOVERED FROM CRASH ===============\n\n");
 
 			continue;
 			// exit(1);

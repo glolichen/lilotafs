@@ -78,6 +78,23 @@ uint32_t change_file_data_len(struct fs_rec_header *file_header, uint32_t data_l
 
 
 struct fs_rec_header *process_advance_header(struct fs_rec_header *cur_header, uint32_t partition_size) {
+	// if wrap header, back to start of partition
+	// the wrap marker magic is FA FA, it's possible we crash between writing these bytes
+	// resulting in FA FF, so we'll read the first byte
+	// since the two bytes of FA FA are equal, this will work on little and big endian
+	if (*((uint8_t *) cur_header + offsetof(struct fs_rec_header, magic)) == 0xFA || cur_header->status == STATUS_WRAP_MARKER) {
+		// if we crash while writing the data_len field of the wrap marker
+		if (cur_header->data_len != 0) {
+			if (change_file_magic(cur_header, FS_WRAP_MARKER))
+				return NULL;
+			if (change_file_status(cur_header, STATUS_WRAP_MARKER))
+				return NULL;
+			if (change_file_data_len(cur_header, 0))
+				return NULL;
+		}
+		return (struct fs_rec_header *) flash_mmap;
+	}
+
 	uint64_t current_offset = (uint64_t) cur_header - (uint64_t) flash_mmap;
 
 	if (current_offset + sizeof(struct fs_rec_header) >= partition_size)
@@ -95,31 +112,10 @@ struct fs_rec_header *process_advance_header(struct fs_rec_header *cur_header, u
 		return NULL;
 	}
 
-	uint32_t next_offset;
-	// if wrap header, back to start of partition
-	if (cur_header->status == STATUS_WRAP_MARKER) {
-		// if we crash while writing the data_len field of the wrap marker
-		// if 0 is written to filename, guarantees data_len is properly written
-		char *filename = (char *) cur_header + sizeof(struct fs_rec_header);
-		if (filename[0] != 0) {
-			uint8_t zero = 0;
-			uint32_t filename_offset = (uint64_t) filename - (uint64_t) flash_mmap;
-			if (change_file_data_len(cur_header, 0))
-				return NULL;
-			if (flash_write(flash_mmap, &zero, filename_offset, 1))
-				return NULL;
-		}
-		next_offset = 0;
-	}
-	else {
-		// go to next header
-		next_offset = current_offset;
-		next_offset += sizeof(struct fs_rec_header);
-		next_offset += filename_len_padded;
-		next_offset = align_up_32(next_offset, FS_DATA_ALIGN);
-		next_offset += cur_header->data_len;
-		next_offset = align_up_32(next_offset, FS_HEADER_ALIGN);
-	}
+	uint32_t next_offset = current_offset + sizeof(struct fs_rec_header) + filename_len_padded;
+	next_offset = align_up_32(next_offset, FS_DATA_ALIGN);
+	next_offset += cur_header->data_len;
+	next_offset = align_up_32(next_offset, FS_HEADER_ALIGN);
 
 	if (next_offset >= partition_size)
 		return NULL;
@@ -149,8 +145,11 @@ struct scan_headers_result {
 		.num_files = 0
 	};
 
-	if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START && cur_header->magic != FS_START_CLEAN)
+	if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START &&
+			cur_header->magic != FS_START_CLEAN && cur_header->magic != FS_WRAP_MARKER) {
+
 		return ret;
+	}
 
 	while (1) {
 		// if mount creates a dummy header, do not count it as a file (it is empty)
@@ -160,7 +159,7 @@ struct scan_headers_result {
 
 		if (cur_header->status == STATUS_WEAR_MARKER)
 			ret.wear_marker = cur_header;
-		if (cur_header->status == STATUS_WRAP_MARKER)
+		if (cur_header->magic == FS_WRAP_MARKER || cur_header->status == STATUS_WRAP_MARKER)
 			ret.wrap_marker = cur_header;
 		if (cur_header->status == STATUS_MIGRATING)
 			ret.migrating = cur_header;
@@ -178,8 +177,11 @@ struct scan_headers_result {
 			break;
 
 		cur_header = next_header;
-		if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START && cur_header->magic != FS_START_CLEAN)
+		if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START &&
+				cur_header->magic != FS_START_CLEAN && cur_header->magic != FS_WRAP_MARKER) {
+
 			break;
+		}
 	}
 	ret.last_header = cur_header;
 	return ret;
@@ -230,7 +232,7 @@ uint32_t check_free_space(uint32_t current_offset, uint32_t write_offset, uint32
 	new_file_total += len;
 	new_file_total = align_up_32(new_file_total, FS_HEADER_ALIGN);
 
-	uint32_t wrap_marker_total = sizeof(struct fs_rec_header) + 1;
+	uint32_t wrap_marker_total = sizeof(struct fs_rec_header);
 	wrap_marker_total = align_up_32(wrap_marker_total, FS_HEADER_ALIGN);
 
 	uint32_t largest_file_total = sizeof(struct fs_rec_header) + largest_filename_len + 1;
@@ -310,7 +312,7 @@ uint32_t append_file(const char *filename, uint32_t *current_offset, void *buffe
 	new_file_total += len;
 	new_file_total = align_up_32(new_file_total, FS_HEADER_ALIGN);
 
-	uint32_t wrap_marker_total = sizeof(struct fs_rec_header) + 1;
+	uint32_t wrap_marker_total = sizeof(struct fs_rec_header);
 	wrap_marker_total = align_up_32(wrap_marker_total, FS_HEADER_ALIGN);
 
 	// mark old file as migrating
@@ -323,14 +325,11 @@ uint32_t append_file(const char *filename, uint32_t *current_offset, void *buffe
 	// ensure we have space for a wrap marker afterwards
 	if (new_file_total + wrap_marker_total > partition_size - fs_tail) {
 		struct fs_rec_header wrap_marker = {
-			.magic = FS_RECORD,
+			.magic = FS_WRAP_MARKER,
 			.status = STATUS_WRAP_MARKER,
 			.data_len = 0
 		};
-		char empty = 0;
 		if (flash_write(flash_mmap, &wrap_marker, fs_tail, sizeof(struct fs_rec_header)))
-			return FS_EFLASH;
-		if (flash_write(flash_mmap, &empty, fs_tail + sizeof(struct fs_rec_header), 1))
 			return FS_EFLASH;
 		new_file_offset = 0;
 	}
@@ -403,6 +402,9 @@ uint32_t remove_false_magic(uint8_t *start, uint32_t size) {
 }
 
 uint32_t clobber_file_data(struct fs_rec_header *file) {
+	if (*((uint8_t *) file + offsetof(struct fs_rec_header, magic)) == 0xFA || file->status == STATUS_WRAP_MARKER)
+		return FS_SUCCESS;
+
 	char *filename = (char *) file + sizeof(struct fs_rec_header);
 	uint32_t filename_offset = (uint64_t) filename - (uint64_t) flash_mmap;
 
@@ -465,18 +467,22 @@ uint32_t wear_level_compact(struct fs_rec_header *wear_marker, uint32_t num_file
 	struct fs_rec_header *cur_header = (struct fs_rec_header *) (flash_mmap + fs_head);
 
 	// this should be impossible
-	if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START && cur_header->magic != FS_START_CLEAN) {
-		PRINTF("??????????\n");
-		return FS_EUNKNOWN;
-	}
+	// if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START && cur_header->magic != FS_START_CLEAN) {
+	// 	PRINTF("??????????\n");
+	// 	return FS_EUNKNOWN;
+	// }
 
 	while (1) {
 		struct fs_rec_header *next_header = process_advance_header(cur_header, partition_size);
 
 		if (!next_header)
 			break;
-		if (next_header->magic != FS_RECORD && next_header->magic != FS_START && next_header->magic != FS_START_CLEAN)
+
+		if (next_header->magic != FS_RECORD && next_header->magic != FS_START &&
+				next_header->magic != FS_START_CLEAN && next_header->magic != FS_WRAP_MARKER) {
+
 			break;
+		}
 
 		uint32_t cur_offset = (uint64_t) cur_header - (uint64_t) flash_mmap;
 		uint32_t next_offset = (uint64_t) next_header - (uint64_t) flash_mmap;
@@ -567,7 +573,7 @@ struct fs_rec_header *find_file_name(const char *name) {
 		if (!next_header)
 			break;
 		cur_header = next_header;
-		if (cur_header->magic != FS_RECORD)
+		if (cur_header->magic != FS_RECORD && cur_header->magic != FS_WRAP_MARKER)
 			break;
 	}
 	return NULL;
@@ -1169,8 +1175,11 @@ uint32_t lfs_count_files() {
 	uint32_t partition_size = flash_get_total_size();
 	struct fs_rec_header *cur_header = (struct fs_rec_header *) (flash_mmap + fs_head);
 
-	if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START && cur_header->magic != FS_START_CLEAN)
+	if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START &&
+			cur_header->magic != FS_START_CLEAN && cur_header->magic != FS_WRAP_MARKER) {
+
 		return count;
+	}
 
 	char *filename = (char *) cur_header + sizeof(struct fs_rec_header);
 	if (cur_header->status == STATUS_COMMITTED && (cur_header->magic != FS_START || strlen(filename) != 0))
@@ -1181,8 +1190,12 @@ uint32_t lfs_count_files() {
 		if (!next_header)
 			break;
 		cur_header = next_header;
-		if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START && cur_header->magic != FS_START_CLEAN)
-			break;
+
+		if (cur_header->magic != FS_RECORD && cur_header->magic != FS_START &&
+			cur_header->magic != FS_START_CLEAN && cur_header->magic != FS_WRAP_MARKER) {
+
+			return count;
+		}
 
 		filename = (char *) cur_header + sizeof(struct fs_rec_header);
 		if (cur_header->status == STATUS_COMMITTED && (cur_header->magic != FS_START || strlen(filename) != 0))

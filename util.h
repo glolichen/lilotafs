@@ -3,10 +3,10 @@
 
 #include <stdint.h>
 
-// #define PRINT_STUFF
+#define PRINT_STUFF
 // #define PRINT_FREE
 
-#define FILE_COUNT 1
+#define FILE_COUNT 60
 #define OP_COUNT 4000
 
 #define MIN_SIZE 5
