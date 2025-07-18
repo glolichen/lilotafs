@@ -600,7 +600,8 @@ uint32_t lfs_mount() {
 	uint32_t num_files = 0;
 
 	// if position 0 is an normal file, not the head, or there is nothing there
-	if (cur_header->magic != FS_START_CLEAN && cur_header->magic != FS_START) {
+	// or it is FS_START_CLEAN
+	if (cur_header->magic != FS_START) {
 		// follow current file until no more
 		// (if no file at 0 this will return cur_header immediately, then offset = 0)
 		struct scan_headers_result scan_result = scan_headers(cur_header, partition_size);

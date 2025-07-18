@@ -32,7 +32,7 @@
 
 #define RANDOM_NUMBER(min, max) (rand() % ((max) - (min) + 1) + (min))
 #ifdef PRINT_STUFF
-#define PRINTF(format, ...) printf("        " format, ##__VA_ARGS__)
+#define PRINTF(format, ...) printf(format, ##__VA_ARGS__)
 #else
 inline static uint32_t evaluate_all(const char *fmt, ...) {
 	(void) fmt;
