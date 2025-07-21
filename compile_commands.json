@@ -1,7 +1,7 @@
 [
   {
     "arguments": [
-      "/usr/bin/clang",
+      "/usr/bin/gcc",
       "-c",
       "-I.",
       "-D",
@@ -11,7 +11,7 @@
       "-Wall",
       "-Wextra",
       "-g",
-      "-O3",
+      "-O0",
       "-fsanitize=address,undefined",
       "-o",
       "lilotaFS.o",
@@ -23,7 +23,7 @@
   },
   {
     "arguments": [
-      "/usr/bin/clang",
+      "/usr/bin/gcc",
       "-c",
       "-I.",
       "-D",
@@ -33,7 +33,7 @@
       "-Wall",
       "-Wextra",
       "-g",
-      "-O3",
+      "-O0",
       "-fsanitize=address,undefined",
       "-o",
       "flash.o",
@@ -45,7 +45,7 @@
   },
   {
     "arguments": [
-      "/usr/bin/clang",
+      "/usr/bin/gcc",
       "-c",
       "-I.",
       "-D",
@@ -55,7 +55,7 @@
       "-Wall",
       "-Wextra",
       "-g",
-      "-O3",
+      "-O0",
       "-fsanitize=address,undefined",
       "-o",
       "torture_util.o",
@@ -67,7 +67,7 @@
   },
   {
     "arguments": [
-      "/usr/bin/clang",
+      "/usr/bin/gcc",
       "-c",
       "-I.",
       "-D",
@@ -77,14 +77,14 @@
       "-Wall",
       "-Wextra",
       "-g",
-      "-O3",
+      "-O0",
       "-fsanitize=address,undefined",
       "-o",
-      "torture.o",
-      "torture.c"
+      "test.o",
+      "test.c"
     ],
     "directory": "/home/jayden/lilotaFS",
-    "file": "/home/jayden/lilotaFS/torture.c",
-    "output": "/home/jayden/lilotaFS/torture.o"
+    "file": "/home/jayden/lilotaFS/test.c",
+    "output": "/home/jayden/lilotaFS/test.o"
   }
 ]

@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-// #define PRINT_STUFF
+#define PRINT_STUFF
 // #define PRINT_FREE
 
 #define FILE_COUNT 60

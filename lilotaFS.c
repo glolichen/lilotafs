@@ -21,48 +21,57 @@ uint32_t u32_max(uint32_t a, uint32_t b) {
 	return a > b ? a : b;
 }
 
-struct fs_rec_header *scan_for_header(uint8_t *flash_mmap, uint32_t start, uint32_t partition_size) {
+struct fs_rec_header *scan_for_header(struct fs_context *ctx, uint32_t start, uint32_t partition_size) {
 	start = align_up_32(start, FS_HEADER_ALIGN);
 	for (uint32_t i = start; i <= partition_size - sizeof(struct fs_rec_header); i += FS_HEADER_ALIGN) {
-		struct fs_rec_header *header = (struct fs_rec_header *) (flash_mmap + i);
+		struct fs_rec_header *header = (struct fs_rec_header *) (ctx->flash_mmap + i);
 		if (header->magic == FS_START || header->magic == FS_START_CLEAN)
 			return header;
 	}
 	return NULL;
 }
 
-uint32_t change_file_magic(uint8_t *flash_mmap, struct fs_rec_header *file_header, uint16_t magic) {
-	uint32_t file_offset = (uint64_t) file_header - (uint64_t) flash_mmap;
+uint32_t change_file_magic(struct fs_context *ctx, struct fs_rec_header *file_header, uint16_t magic) {
+	uint32_t file_offset = (uint64_t) file_header - (uint64_t) ctx->flash_mmap;
 	uint32_t magic_addr = file_offset + offsetof(struct fs_rec_header, magic);
 
-	int out = flash_write(flash_mmap, &magic, magic_addr, 2);
+	int out = flash_write(ctx->flash_mmap, &magic, magic_addr, 2);
 	if (out)
 		return FS_EFLASH;
 
 	file_header->magic = magic;
 	return 0;
 }
-uint32_t change_file_status(uint8_t *flash_mmap, struct fs_rec_header *file_header, uint8_t status) {
-	uint32_t file_offset = (uint64_t) file_header - (uint64_t) flash_mmap;
+uint32_t change_file_status(struct fs_context *ctx, struct fs_rec_header *file_header, uint8_t status) {
+	uint32_t file_offset = (uint64_t) file_header - (uint64_t) ctx->flash_mmap;
 	uint32_t status_addr = file_offset + offsetof(struct fs_rec_header, status);
 
-	int out = flash_write(flash_mmap, &status, status_addr, 1);
+	int out = flash_write(ctx->flash_mmap, &status, status_addr, 1);
 	if (out)
 		return FS_EFLASH;
 
 	file_header->status = status;
 	return 0;
 }
-uint32_t change_file_data_len(uint8_t *flash_mmap, struct fs_rec_header *file_header, uint32_t data_len) {
-	uint32_t file_offset = (uint64_t) file_header - (uint64_t) flash_mmap;
+uint32_t change_file_data_len(struct fs_context *ctx, struct fs_rec_header *file_header, uint32_t data_len) {
+	uint32_t file_offset = (uint64_t) file_header - (uint64_t) ctx->flash_mmap;
 	uint32_t data_len_addr = file_offset + offsetof(struct fs_rec_header, data_len);
 
-	int out = flash_write(flash_mmap, &data_len, data_len_addr, 4);
+	int out = flash_write(ctx->flash_mmap, &data_len, data_len_addr, 4);
 	if (out)
 		return FS_EFLASH;
 
 	file_header->data_len = data_len;
 	return 0;
+}
+
+bool magic_is_wrap_marker(struct fs_rec_header *file) {
+	// the magic number for the wrap marker is 0x5AFA
+	if (file->magic == FS_WRAP_MARKER)
+		return true;
+	if (*((uint8_t *) file + offsetof(struct fs_rec_header, magic)) == 0xFA)
+		return true;
+	return false;
 }
 
 
@@ -73,14 +82,14 @@ struct fs_rec_header *process_advance_header(struct fs_context *ctx, struct fs_r
 	// the wrap marker magic is FA FA, it's possible we crash between writing these bytes
 	// resulting in FA FF, so we'll read the first byte
 	// since the two bytes of FA FA are equal, this will work on little and big endian
-	if (cur_header->magic == FS_WRAP_MARKER || cur_header->status == STATUS_WRAP_MARKER) {
+	if (magic_is_wrap_marker(cur_header) || cur_header->status == STATUS_WRAP_MARKER) {
 		// if we crash while writing the data_len field of the wrap marker
 		if (cur_header->data_len != 0) {
-			if (change_file_magic(ctx->flash_mmap, cur_header, FS_WRAP_MARKER))
+			if (change_file_magic(ctx, cur_header, FS_WRAP_MARKER))
 				return NULL;
-			if (change_file_status(ctx->flash_mmap, cur_header, STATUS_WRAP_MARKER))
+			if (change_file_status(ctx, cur_header, STATUS_WRAP_MARKER))
 				return NULL;
-			if (change_file_data_len(ctx->flash_mmap, cur_header, 0))
+			if (change_file_data_len(ctx, cur_header, 0))
 				return NULL;
 		}
 		return (struct fs_rec_header *) ctx->flash_mmap;
@@ -150,7 +159,7 @@ struct scan_headers_result {
 
 		if (cur_header->status == STATUS_WEAR_MARKER)
 			ret.wear_marker = cur_header;
-		if (cur_header->magic == FS_WRAP_MARKER || cur_header->status == STATUS_WRAP_MARKER)
+		if (magic_is_wrap_marker(cur_header) || cur_header->status == STATUS_WRAP_MARKER)
 			ret.wrap_marker = cur_header;
 		if (cur_header->status == STATUS_MIGRATING)
 			ret.migrating = cur_header;
@@ -311,7 +320,7 @@ uint32_t append_file(struct fs_context *ctx, const char *filename, uint32_t *cur
 	// mark old file as migrating
 	if (*current_offset != UINT32_MAX) {
 		struct fs_rec_header *old_header = (struct fs_rec_header *) (ctx->flash_mmap + *current_offset);
-		change_file_status(ctx->flash_mmap, old_header, STATUS_MIGRATING);
+		change_file_status(ctx, old_header, STATUS_MIGRATING);
 	}
 
 	uint32_t new_file_offset = ctx->fs_tail;
@@ -347,13 +356,13 @@ uint32_t append_file(struct fs_context *ctx, const char *filename, uint32_t *cur
 	}
 
 	// phase 3: commit
-	if (change_file_status(ctx->flash_mmap, (struct fs_rec_header *) (ctx->flash_mmap + new_file_offset), want_status))
+	if (change_file_status(ctx, (struct fs_rec_header *) (ctx->flash_mmap + new_file_offset), want_status))
 		return FS_EFLASH;
 
 	// invalidate old
 	if (*current_offset != UINT32_MAX) {
 		struct fs_rec_header *old_header = (struct fs_rec_header *) (ctx->flash_mmap + *current_offset);
-		if (change_file_status(ctx->flash_mmap, old_header, STATUS_DELETED))
+		if (change_file_status(ctx, old_header, STATUS_DELETED))
 			return FS_EFLASH;
 	}
 	
@@ -380,32 +389,32 @@ uint32_t lfs_set_file(struct fs_context *ctx, int fd) {
 	return 0;
 }
 
-uint32_t remove_false_magic(uint8_t *flash_mmap, uint8_t *start, uint32_t size) {
+uint32_t remove_false_magic(struct fs_context *ctx, uint8_t *start, uint32_t size) {
 	for (uint8_t *p = (uint8_t *) align_up_64((uint64_t) start, FS_HEADER_ALIGN); p < start + size; p += FS_HEADER_ALIGN) {
 		uint16_t magic = *((uint16_t *) p);
 		// if data is any magic number, set it to 0 to avoid picking it up by mistake
 		if (magic == FS_RECORD || magic == FS_START || magic == FS_START_CLEAN) {
-			uint32_t offset = (uint64_t) p - (uint64_t) flash_mmap;
+			uint32_t offset = (uint64_t) p - (uint64_t) ctx->flash_mmap;
 			uint16_t zero = 0;
-			if (flash_write(flash_mmap, &zero, offset, 2))
+			if (flash_write(ctx->flash_mmap, &zero, offset, 2))
 				return FS_EFLASH;
 		}
 	}
 	return FS_SUCCESS;
 }
 
-uint32_t clobber_file_data(uint8_t *flash_mmap, struct fs_rec_header *file) {
-	if (file->magic == FS_WRAP_MARKER || file->status == STATUS_WRAP_MARKER)
+uint32_t clobber_file_data(struct fs_context *ctx, struct fs_rec_header *file) {
+	if (magic_is_wrap_marker(file) || file->status == STATUS_WRAP_MARKER)
 		return FS_SUCCESS;
 
 	char *filename = (char *) file + sizeof(struct fs_rec_header);
-	uint32_t filename_offset = (uint64_t) filename - (uint64_t) flash_mmap;
+	uint32_t filename_offset = (uint64_t) filename - (uint64_t) ctx->flash_mmap;
 
 	uint32_t data_offset = filename_offset + strlen(filename) + 1;
 	data_offset = align_up_32(data_offset, FS_DATA_ALIGN);
 	data_offset += file->data_len;
 
-	return remove_false_magic(flash_mmap, (uint8_t *) filename, data_offset - filename_offset);
+	return remove_false_magic(ctx, (uint8_t *) filename, data_offset - filename_offset);
 }
 
 uint32_t erase_file(struct fs_context *ctx, uint32_t cur_offset, uint32_t next_offset) {
@@ -426,7 +435,7 @@ uint32_t erase_file(struct fs_context *ctx, uint32_t cur_offset, uint32_t next_o
 	// clobber part of block the new file is in, that is before the file
 	if (next_offset % sector_size != 0) {
 		uint32_t sector_start = align_down_32(next_offset, sector_size);
-		if (remove_false_magic(ctx->flash_mmap, ctx->flash_mmap + sector_start, next_offset % sector_size))
+		if (remove_false_magic(ctx, ctx->flash_mmap + sector_start, next_offset % sector_size))
 			return FS_EFLASH;
 	}
 
@@ -449,7 +458,7 @@ uint32_t wear_level_compact(struct fs_context *ctx, struct fs_rec_header *wear_m
 	uint32_t sector_size = flash_get_sector_size();
 
 	// delete wear marker
-	if (change_file_status(ctx->flash_mmap, wear_marker, STATUS_DELETED))
+	if (change_file_status(ctx, wear_marker, STATUS_DELETED))
 		return FS_EFLASH;
 
 	// this is the number of files we will copy to the tail
@@ -503,12 +512,12 @@ uint32_t wear_level_compact(struct fs_context *ctx, struct fs_rec_header *wear_m
 
 		// we need to be deliberate about the order to make modifications in case of a crash
 		// first, set the current file to FS_START_CLEAN, indicating this file is the old FS_START
-		if (change_file_magic(ctx->flash_mmap, next_header, FS_START_CLEAN))
+		if (change_file_magic(ctx, next_header, FS_START_CLEAN))
 			return FS_EFLASH;
 
 		// we cannot have any magic numbers in 32 byte boundaries, or they will be detected as files
 		// we want to clobber the filename too, so data start is the file name
-		uint32_t code = clobber_file_data(ctx->flash_mmap, cur_header);
+		uint32_t code = clobber_file_data(ctx, cur_header);
 		if (code != FS_SUCCESS)
 			return code;
 
@@ -528,7 +537,7 @@ uint32_t wear_level_compact(struct fs_context *ctx, struct fs_rec_header *wear_m
 
 		// done with processing the current file
 		// now advance FS_START and delete the just-moved file
-		if (change_file_magic(ctx->flash_mmap, next_header, FS_START))
+		if (change_file_magic(ctx, next_header, FS_START))
 			return FS_EFLASH;
 
 		// NOTE: if we crash here, there is one or two FS_START's
@@ -536,7 +545,7 @@ uint32_t wear_level_compact(struct fs_context *ctx, struct fs_rec_header *wear_m
 
 		// do not set magic to 0 if the sector has been erased
 		if (next_offset / sector_size == cur_offset / sector_size) {
-			if (change_file_magic(ctx->flash_mmap, cur_header, 0))
+			if (change_file_magic(ctx, cur_header, 0))
 				return FS_EFLASH;
 		}
 
@@ -657,7 +666,7 @@ uint32_t lfs_mount(struct fs_context *ctx) {
 		}
 
 		// scan disk 1 byte at a time until we find FS_START magic
-		cur_header = scan_for_header(ctx->flash_mmap, offset, partition_size);
+		cur_header = scan_for_header(ctx, offset, partition_size);
 
 		// if cur_header is NULL: no FS_START
 		// if offset 0 is FS_START_CLEAN, then this is the result of the crash described earlier
@@ -709,7 +718,7 @@ uint32_t lfs_mount(struct fs_context *ctx) {
 
 	// 1. if the first is FS_START_CLEAN
 	if (cur_header->magic == FS_START_CLEAN) {
-		if (change_file_magic(ctx->flash_mmap, cur_header, FS_START))
+		if (change_file_magic(ctx, cur_header, FS_START))
 			return FS_EFLASH;
 	}
 	else {
@@ -717,7 +726,7 @@ uint32_t lfs_mount(struct fs_context *ctx) {
 		if (next_header) {
 			// 2. crash after the file has been cleaned up, simply delete the old file
 			if (next_header->magic == FS_START) {
-				if (change_file_magic(ctx->flash_mmap, cur_header, 0))
+				if (change_file_magic(ctx, cur_header, 0))
 					return FS_EFLASH;
 				cur_header = next_header;
 			}
@@ -727,7 +736,7 @@ uint32_t lfs_mount(struct fs_context *ctx) {
 				uint32_t next_offset = (uint64_t) next_header - (uint64_t) ctx->flash_mmap;
 
 				// we cannot have any magic numbers in 32 byte boundaries, or they will be detected as files
-				uint32_t code = clobber_file_data(ctx->flash_mmap, cur_header);
+				uint32_t code = clobber_file_data(ctx, cur_header);
 				if (code != FS_SUCCESS)
 					return code;
 
@@ -744,12 +753,12 @@ uint32_t lfs_mount(struct fs_context *ctx) {
 
 				// done with processing the current file
 				// now advance FS_START and delete the just-moved file
-				if (change_file_magic(ctx->flash_mmap, next_header, FS_START))
+				if (change_file_magic(ctx, next_header, FS_START))
 					return FS_EFLASH;
 
 				// do not set magic to 0 if the sector has been erased
 				if (next_offset / sector_size == cur_offset / sector_size) {
-					if (change_file_magic(ctx->flash_mmap, cur_header, 0))
+					if (change_file_magic(ctx, cur_header, 0))
 						return FS_EFLASH;
 				}
 
@@ -828,13 +837,13 @@ uint32_t lfs_mount(struct fs_context *ctx) {
 		}
 
 		if (can_write) {
-			if (change_file_data_len(ctx->flash_mmap, reserved, migrating->data_len))
+			if (change_file_data_len(ctx, reserved, migrating->data_len))
 				return FS_EFLASH;
 			if (flash_write(ctx->flash_mmap, migrating_ptr, reserved_offset + sizeof(struct fs_rec_header), total_size))
 				return FS_EFLASH;
-			if (change_file_status(ctx->flash_mmap, reserved, STATUS_COMMITTED))
+			if (change_file_status(ctx, reserved, STATUS_COMMITTED))
 				return FS_EFLASH;
-			if (change_file_status(ctx->flash_mmap, migrating, STATUS_DELETED))
+			if (change_file_status(ctx, migrating, STATUS_DELETED))
 				return FS_EFLASH;
 		}
 		else {
@@ -866,7 +875,7 @@ uint32_t lfs_mount(struct fs_context *ctx) {
 
 					// note we are writing the data len first!
 					// so that if we crash between these two writes, we waste less space
-					if (change_file_data_len(ctx->flash_mmap, cur_header, 0))
+					if (change_file_data_len(ctx, cur_header, 0))
 						return FS_EFLASH;
 					if (flash_write(ctx->flash_mmap, &zero, terminate_position, 1))
 						return FS_EFLASH;
@@ -875,7 +884,7 @@ uint32_t lfs_mount(struct fs_context *ctx) {
 				}
 			}
 
-			if (change_file_status(ctx->flash_mmap, reserved, STATUS_DELETED))
+			if (change_file_status(ctx, reserved, STATUS_DELETED))
 				return FS_EFLASH;
 
 			uint32_t migrating_offset = (uint64_t) migrating - (uint64_t) ctx->flash_mmap;
@@ -931,7 +940,7 @@ uint32_t lfs_mount(struct fs_context *ctx) {
 				return code;
 		}
 
-		if (change_file_status(ctx->flash_mmap, scan_result.migrating, STATUS_DELETED))
+		if (change_file_status(ctx, scan_result.migrating, STATUS_DELETED))
 			return FS_EFLASH;
 	}
 
@@ -952,7 +961,7 @@ uint32_t lfs_mount(struct fs_context *ctx) {
 
 		// full filename with null terminator => data_len is completely written
 		if (reserved_filename_len != 64) {
-			if (change_file_status(ctx->flash_mmap, reserved, STATUS_DELETED))
+			if (change_file_status(ctx, reserved, STATUS_DELETED))
 				return FS_EFLASH;
 			ctx->fs_tail += sizeof(struct fs_rec_header) + reserved_filename_len + 1;
 			ctx->fs_tail = align_up_32(ctx->fs_tail, FS_DATA_ALIGN);
@@ -965,11 +974,11 @@ uint32_t lfs_mount(struct fs_context *ctx) {
 			// pretend the file name was supposed to be 63, which is the longest allowed
 			terminate_position += sizeof(struct fs_rec_header) + 63;
 
-			if (change_file_data_len(ctx->flash_mmap, cur_header, 0))
+			if (change_file_data_len(ctx, cur_header, 0))
 				return FS_EFLASH;
 			if (flash_write(ctx->flash_mmap, &zero, terminate_position, 1))
 				return FS_EFLASH;
-			if (change_file_status(ctx->flash_mmap, reserved, STATUS_DELETED))
+			if (change_file_status(ctx, reserved, STATUS_DELETED))
 				return FS_EFLASH;
 
 			ctx->fs_tail = align_up_32(terminate_position + 1, FS_HEADER_ALIGN);
@@ -1146,7 +1155,7 @@ uint32_t vfs_delete(struct fs_context *ctx, uint32_t fd) {
 
 	struct fs_file_descriptor descriptor = ctx->fd_list[fd - 1];
 	struct fs_rec_header *header = (struct fs_rec_header *) (ctx->flash_mmap + descriptor.offset);
-	if (change_file_status(ctx->flash_mmap, header, STATUS_DELETED))
+	if (change_file_status(ctx, header, STATUS_DELETED))
 		return FS_EFLASH;
 
 	if (header->data_len == ctx->largest_filename_len) {
