@@ -77,24 +77,25 @@ struct fs_file_descriptor {
 	uint32_t offset;
 };
 
-uint32_t lfs_set_file(struct fs_context *ctx, int fd);
-uint32_t lfs_unmount(struct fs_context *ctx);
-uint32_t lfs_mount(struct fs_context *ctx);
+uint32_t lilotafs_test_set_file(struct fs_context *ctx, int fd);
+uint32_t lilotafs_unmount(struct fs_context *ctx);
+uint32_t lilotafs_mount(struct fs_context *ctx);
 
-uint32_t vfs_open_errno(struct fs_context *ctx);
-uint32_t vfs_open(struct fs_context *ctx, const char *name, int flags);
-uint32_t vfs_close(struct fs_context *ctx, uint32_t fd);
-uint32_t vfs_write(struct fs_context *ctx, uint32_t fd, void *buffer, uint32_t len);
-uint32_t vfs_get_size(struct fs_context *ctx, uint32_t fd);
-uint32_t vfs_read(struct fs_context *ctx, uint32_t fd, void *buffer, uint32_t addr, uint32_t len);
-uint32_t vfs_delete(struct fs_context *ctx, uint32_t fd);
+uint32_t lilotafs_open_errno(struct fs_context *ctx);
 
-uint32_t lfs_count_files(struct fs_context *ctx);
+uint32_t lilotafs_open(struct fs_context *ctx, const char *name, int flags);
+uint32_t lilotafs_close(struct fs_context *ctx, uint32_t fd);
+uint32_t lilotafs_write(struct fs_context *ctx, uint32_t fd, void *buffer, uint32_t len);
+uint32_t lilotafs_get_size(struct fs_context *ctx, uint32_t fd);
+uint32_t lilotafs_read(struct fs_context *ctx, uint32_t fd, void *buffer, uint32_t addr, uint32_t len);
+uint32_t lilotafs_delete(struct fs_context *ctx, uint32_t fd);
 
-uint32_t lfs_get_largest_file_size(struct fs_context *ctx);
-uint32_t lfs_get_largest_filename_len(struct fs_context *ctx);
-uint32_t lfs_get_head(struct fs_context *ctx);
-uint32_t lfs_get_tail(struct fs_context *ctx);
+uint32_t lilotafs_count_files(struct fs_context *ctx);
+
+uint32_t lilotafs_get_largest_file_size(struct fs_context *ctx);
+uint32_t lilotafs_get_largest_filename_len(struct fs_context *ctx);
+uint32_t lilotafs_get_head(struct fs_context *ctx);
+uint32_t lilotafs_get_tail(struct fs_context *ctx);
 
 #endif 
 

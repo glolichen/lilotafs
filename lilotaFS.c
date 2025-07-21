@@ -382,7 +382,7 @@ uint32_t append_file(struct fs_context *ctx, const char *filename, uint32_t *cur
 	return FS_SUCCESS;
 }
 
-uint32_t lfs_set_file(struct fs_context *ctx, int fd) {
+uint32_t lilotafs_test_set_file(struct fs_context *ctx, int fd) {
 	ctx->flash_mmap = mmap(NULL, flash_get_total_size(), PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
 	if (ctx->flash_mmap == MAP_FAILED)
 		return -1;
@@ -582,7 +582,7 @@ struct fs_rec_header *find_file_name(struct fs_context *ctx, const char *name) {
 }
 
 // simulate graceful computer shutdown
-uint32_t lfs_unmount(struct fs_context *ctx) {
+uint32_t lilotafs_unmount(struct fs_context *ctx) {
 	ctx->largest_file_size = 0, ctx->largest_filename_len = 0;
 	ctx->fs_head = 0, ctx->fs_tail = 0;
 	ctx->has_wear_marker = false;
@@ -598,7 +598,7 @@ uint32_t lfs_unmount(struct fs_context *ctx) {
 }
 
 
-uint32_t lfs_mount(struct fs_context *ctx) {
+uint32_t lilotafs_mount(struct fs_context *ctx) {
 	ctx->largest_file_size = 0, ctx->largest_filename_len = 0;
 	ctx->fs_head = 0, ctx->fs_tail = 0;
 	ctx->has_wear_marker = false;
@@ -1043,11 +1043,11 @@ uint32_t fd_list_add(struct fs_context *ctx, struct fs_file_descriptor fd) {
 	return ctx->fd_list_size - 1;
 }
 
-uint32_t vfs_open_errno(struct fs_context *ctx) {
+uint32_t lilotafs_open_errno(struct fs_context *ctx) {
 	return ctx->vfs_open_error;
 }
 
-uint32_t vfs_open(struct fs_context *ctx, const char *name, int flags) {
+uint32_t lilotafs_open(struct fs_context *ctx, const char *name, int flags) {
 	uint32_t filename_len = strlen(name);
 	if (filename_len > FS_MAX_FILENAME_LEN) {
 		ctx->vfs_open_error = FS_EINVAL;
@@ -1085,7 +1085,7 @@ uint32_t vfs_open(struct fs_context *ctx, const char *name, int flags) {
 	return fd_index + 1;
 }
 
-uint32_t vfs_close(struct fs_context *ctx, uint32_t fd) {
+uint32_t lilotafs_close(struct fs_context *ctx, uint32_t fd) {
 	if (fd - 1 >= ctx->fd_list_size)
 		return FS_EBADF;
 
@@ -1099,7 +1099,7 @@ uint32_t vfs_close(struct fs_context *ctx, uint32_t fd) {
 	return 0;
 }
 
-uint32_t vfs_write(struct fs_context *ctx, uint32_t fd, void *buffer, uint32_t len) {
+uint32_t lilotafs_write(struct fs_context *ctx, uint32_t fd, void *buffer, uint32_t len) {
 	if (fd - 1 >= ctx->fd_list_size)
 		return FS_EBADF;
 
@@ -1124,7 +1124,7 @@ uint32_t vfs_write(struct fs_context *ctx, uint32_t fd, void *buffer, uint32_t l
 	return FS_SUCCESS;
 }
 
-uint32_t vfs_get_size(struct fs_context *ctx, uint32_t fd) {
+uint32_t lilotafs_get_size(struct fs_context *ctx, uint32_t fd) {
 	if (fd - 1 >= ctx->fd_list_size)
 		return FS_EBADF;
 
@@ -1133,7 +1133,7 @@ uint32_t vfs_get_size(struct fs_context *ctx, uint32_t fd) {
 	return header->data_len;
 }
 
-uint32_t vfs_read(struct fs_context *ctx, uint32_t fd, void *buffer, uint32_t addr, uint32_t len) {
+uint32_t lilotafs_read(struct fs_context *ctx, uint32_t fd, void *buffer, uint32_t addr, uint32_t len) {
 	if (fd - 1 >= ctx->fd_list_size)
 		return FS_EBADF;
 
@@ -1149,7 +1149,7 @@ uint32_t vfs_read(struct fs_context *ctx, uint32_t fd, void *buffer, uint32_t ad
 	return FS_SUCCESS;
 }
 
-uint32_t vfs_delete(struct fs_context *ctx, uint32_t fd) {
+uint32_t lilotafs_delete(struct fs_context *ctx, uint32_t fd) {
 	if (fd - 1 >= ctx->fd_list_size)
 		return FS_EBADF;
 
@@ -1175,7 +1175,7 @@ uint32_t vfs_delete(struct fs_context *ctx, uint32_t fd) {
 }
 
 
-uint32_t lfs_count_files(struct fs_context *ctx) {
+uint32_t lilotafs_count_files(struct fs_context *ctx) {
 	uint32_t count = 0;
 	uint32_t partition_size = flash_get_total_size();
 	struct fs_rec_header *cur_header = (struct fs_rec_header *) (ctx->flash_mmap + ctx->fs_head);
@@ -1210,16 +1210,16 @@ uint32_t lfs_count_files(struct fs_context *ctx) {
 	return count;
 }
 
-uint32_t lfs_get_largest_file_size(struct fs_context *ctx) {
+uint32_t lilotafs_get_largest_file_size(struct fs_context *ctx) {
 	return ctx->largest_file_size;
 }
-uint32_t lfs_get_largest_filename_len(struct fs_context *ctx) {
+uint32_t lilotafs_get_largest_filename_len(struct fs_context *ctx) {
 	return ctx->largest_filename_len;
 }
-uint32_t lfs_get_head(struct fs_context *ctx) {
+uint32_t lilotafs_get_head(struct fs_context *ctx) {
 	return ctx->fs_head;
 }
-uint32_t lfs_get_tail(struct fs_context *ctx) {
+uint32_t lilotafs_get_tail(struct fs_context *ctx) {
 	return ctx->fs_tail;
 }
 

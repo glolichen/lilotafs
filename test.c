@@ -37,8 +37,8 @@ int main(int argc, char *argv[]) {
 	struct fs_context ctx;
 	memset(&ctx, 0, sizeof(struct fs_context));
 
-	lfs_set_file(&ctx, disk);
-	printf("mount: %u\n", lfs_mount(&ctx));
+	lilotafs_test_set_file(&ctx, disk);
+	printf("mount: %u\n", lilotafs_mount(&ctx));
 
 	char input[101];
 	char *token;
@@ -106,15 +106,15 @@ int main(int argc, char *argv[]) {
 		// printf("filename = %.63s\n", filename);
 
 		if (mode == 'o') {
-			uint32_t ret_fd = vfs_open(&ctx, filename, FS_READABLE | FS_WRITABLE | (flag ? FS_CREATE : 0));
+			uint32_t ret_fd = lilotafs_open(&ctx, filename, FS_READABLE | FS_WRITABLE | (flag ? FS_CREATE : 0));
 			printf("open file %.63s fd: %u\n", filename, ret_fd);
 		}
 		else if (mode == 'c') {
-			uint32_t result = vfs_close(&ctx, fd);
+			uint32_t result = lilotafs_close(&ctx, fd);
 			printf("close fd %u: %u\n", fd, result);
 		}
 		else if (mode == 'd') {
-			uint32_t result = vfs_delete(&ctx, fd);
+			uint32_t result = lilotafs_delete(&ctx, fd);
 			printf("delete fd %u: %u\n", fd, result);
 
 		}
@@ -123,16 +123,16 @@ int main(int argc, char *argv[]) {
 			uint8_t *data = (uint8_t *) malloc(size);
 			for (uint32_t i = 0; i < size; i++)
 				data[i] = mode == 'W' ? RANDOM_NUMBER(0, 255) : 0xFF;
-			uint32_t result = vfs_write(&ctx, fd, data, size);
+			uint32_t result = lilotafs_write(&ctx, fd, data, size);
 			printf("write %u bytes to fd %u: %u\n", size, fd, result);
 			free(data);
 		}
 		else if (mode == 'q') {
-			uint32_t count = lfs_count_files(&ctx);
-			uint32_t largest_file = lfs_get_largest_file_size(&ctx);
-			uint32_t largest_filename_len = lfs_get_largest_filename_len(&ctx);
-			uint32_t head = lfs_get_head(&ctx);
-			uint32_t tail = lfs_get_tail(&ctx);
+			uint32_t count = lilotafs_count_files(&ctx);
+			uint32_t largest_file = lilotafs_get_largest_file_size(&ctx);
+			uint32_t largest_filename_len = lilotafs_get_largest_filename_len(&ctx);
+			uint32_t head = lilotafs_get_head(&ctx);
+			uint32_t tail = lilotafs_get_tail(&ctx);
 			printf("number of files: %u\n", count);
 			printf("largest file: %u\n", largest_file);
 			printf("largest filename len: %u\n", largest_filename_len);
