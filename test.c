@@ -34,8 +34,8 @@ int main(int argc, char *argv[]) {
 	char *disk_name = argv[1];
 	int disk = open(disk_name, O_RDWR);
 
-	struct fs_context ctx;
-	memset(&ctx, 0, sizeof(struct fs_context));
+	struct lilotafs_context ctx;
+	memset(&ctx, 0, sizeof(struct lilotafs_context));
 
 	lilotafs_test_set_file(&ctx, disk);
 	printf("mount: %u\n", lilotafs_mount(&ctx));
@@ -106,7 +106,7 @@ int main(int argc, char *argv[]) {
 		// printf("filename = %.63s\n", filename);
 
 		if (mode == 'o') {
-			uint32_t ret_fd = lilotafs_open(&ctx, filename, FS_READABLE | FS_WRITABLE | (flag ? FS_CREATE : 0));
+			uint32_t ret_fd = lilotafs_open(&ctx, filename, LILOTAFS_READABLE | LILOTAFS_WRITABLE | (flag ? LILOTAFS_CREATE : 0));
 			printf("open file %.63s fd: %u\n", filename, ret_fd);
 		}
 		else if (mode == 'c') {
@@ -145,8 +145,8 @@ int main(int argc, char *argv[]) {
 	}
 
 	
-	// uint32_t fd = vfs_open("lilota", FS_WRITABLE | FS_READABLE);
-	// uint32_t fd = vfs_open("test", FS_WRITABLE | FS_READABLE | FS_CREATE);
+	// uint32_t fd = vfs_open("lilota", LILOTAFS_WRITABLE | LILOTAFS_READABLE);
+	// uint32_t fd = vfs_open("test", LILOTAFS_WRITABLE | LILOTAFS_READABLE | LILOTAFS_CREATE);
 	// printf("fd: %d\n", fd);
 	// if (fd == UINT32_MAX) {
 	// 	close(disk);
