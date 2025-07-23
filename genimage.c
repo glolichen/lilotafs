@@ -1,8 +1,3 @@
-#ifndef LILOTAFS_LOCAL
-#define LILOTAFS_LOCAL
-#define DISK_SIZE 2
-#endif
-
 #ifdef LILOTAFS_LOCAL
 // #ifndef LILOTAFS_LOCAL
 
@@ -41,12 +36,16 @@ int main(int argc, char *argv[]) {
 	memset(&ctx, 0, sizeof(struct lilotafs_context));
 
 	int err = lilotafs_mount(&ctx, DISK_SIZE, disk);
+	ctx.has_wear_marker = true;
+
 	if (err != LILOTAFS_SUCCESS)
 		return err;
 	
 	printf("formatting disk %s, size %d\n", disk_name, DISK_SIZE);
 	
-	int prefix_length = atoi(argv[2]) - 1;
+	// wc -c will automatically add 1 for the new line
+	// and we will take away another one because we want to keep the leading /
+	int prefix_length = atoi(argv[2]) - 2;
 	struct stat info;
 	for (int i = 3; i < argc; i++) {
 		const char *filename = argv[i];
@@ -63,7 +62,7 @@ int main(int argc, char *argv[]) {
 			fclose(fp);
 			free(rel_filename);
 			free(file_data);
-			return lilotafs_open_errno(&ctx);
+			return lilotafs_errno(&ctx);
 		}
 		
 		err = lilotafs_write(&ctx, lilotafs_fd, file_data, info.st_size);
@@ -71,7 +70,7 @@ int main(int argc, char *argv[]) {
 			fclose(fp);
 			free(rel_filename);
 			free(file_data);
-			return lilotafs_open_errno(&ctx);
+			return lilotafs_errno(&ctx);
 		}
 		
 		printf("    added file %s, size %ld\n", rel_filename, info.st_size);

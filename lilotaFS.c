@@ -328,7 +328,7 @@ int check_free_space(void *ctx, uint32_t current_offset,
 // current_offset is updated with the new offset, provide pointer to UINT32_MAX if only creating
 // updates fs_tail
 int append_file(void *ctx, const char *filename, uint32_t *current_offset,
-					 void *buffer, uint32_t len, uint8_t want_status, bool add_wear_marker) {
+				const void *buffer, uint32_t len, uint8_t want_status, bool add_wear_marker) {
 
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
@@ -414,16 +414,20 @@ int append_file(void *ctx, const char *filename, uint32_t *current_offset,
 int remove_false_magic(void *ctx, uint8_t *start, uint32_t size) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
-	for (uint8_t *p = (uint8_t *) lilotafs_align_up_64((POINTER_SIZE) start, LILOTAFS_HEADER_ALIGN); p < start + size; p += LILOTAFS_HEADER_ALIGN) {
-		uint16_t magic = *((uint16_t *) p);
+	uint32_t start_offset = (POINTER_SIZE) start - (POINTER_SIZE) context->flash_mmap;
+	uint32_t end_offset = start_offset + size;
+	start_offset = lilotafs_align_up_32(start_offset, LILOTAFS_HEADER_ALIGN);
+
+	for (uint32_t i = start_offset; i < end_offset; i += LILOTAFS_HEADER_ALIGN) {
+		uint16_t magic = *((uint16_t *) (context->flash_mmap + i));
 		// if data is any magic number, set it to 0 to avoid picking it up by mistake
 		if (magic == LILOTAFS_RECORD || magic == LILOTAFS_START || magic == LILOTAFS_START_CLEAN) {
-			uint32_t offset = (POINTER_SIZE) p - (POINTER_SIZE) context->flash_mmap;
 			uint16_t zero = 0;
-			if (lilotafs_flash_write(context, &zero, offset, 2))
+			if (lilotafs_flash_write(context, &zero, i, 2))
 				return LILOTAFS_EFLASH;
 		}
 	}
+
 	return LILOTAFS_SUCCESS;
 }
 
@@ -482,6 +486,8 @@ int erase_file(void *ctx, uint32_t cur_offset, uint32_t next_offset) {
 
 // this function has caused sooo many problems
 int wear_level_compact(void *ctx, struct lilotafs_rec_header *wear_marker, uint32_t num_files) {
+	PRINTF("wear leveling start...\n");
+
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
 	uint32_t partition_size = get_partition_size(context);
@@ -599,6 +605,7 @@ struct lilotafs_rec_header *find_file_name(void *ctx, const char *name) {
 	while (1) {
 		if (cur_header->status == LILOTAFS_STATUS_COMMITTED) {
 			char *cur_filename = (char *) cur_header + sizeof(struct lilotafs_rec_header);
+			// PRINTF("found file %s\n", cur_filename);
 			if (strlen(cur_filename) == filename_len && strncmp(cur_filename, name, filename_len) == 0)
 				return cur_header;
 		}
@@ -651,15 +658,18 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 	
 	context->partition = partition;
-	context->flash_sector_size = 4096;
+	context->flash_sector_size = partition->erase_size;
 	
-	esp_partition_mmap(partition, 0, partition->size, ESP_PARTITION_MMAP_DATA, &context->flash_mmap, &context->map_handle);
+	const void **flash_mmap_addr = (const void **) &context->flash_mmap;
+	esp_partition_mmap(partition, 0, partition->size, ESP_PARTITION_MMAP_DATA, flash_mmap_addr, &context->map_handle);
+	
+	PRINTF("partition at %p\n", context->partition);
 #endif
 
 	context->largest_file_size = 0, context->largest_filename_len = 0;
 	context->fs_head = 0, context->fs_tail = 0;
 	context->has_wear_marker = false;
-	context->vfs_open_error = 0;
+	context->errno = 0;
 
 	struct lilotafs_rec_header *cur_header = (struct lilotafs_rec_header *) context->flash_mmap;
 	struct lilotafs_rec_header *wear_marker = NULL;
@@ -676,6 +686,8 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 	// false magics of all files before the wrap marker
 	// so we can advance to the tail and search for headers from there
 	if (cur_header->magic != LILOTAFS_START) {
+		PRINTF("offset 0 is not FS_START\n");
+
 		// follow current file until no more
 		// (if no file at 0 this will return cur_header immediately, then offset = 0)
 		struct scan_headers_result scan_result = scan_headers(context, cur_header, get_partition_size(ctx));
@@ -732,6 +744,8 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 
 	// if none found, write a LILOTAFS_START header at 0
 	if (!cur_header) {
+		PRINTF("no FS_START\n");
+
 		struct lilotafs_rec_header new_header = {
 			.magic = LILOTAFS_START,
 			.status = LILOTAFS_STATUS_COMMITTED,
@@ -780,12 +794,15 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 		if (next_header) {
 			// 2. crash after the file has been cleaned up, simply delete the old file
 			if (next_header->magic == LILOTAFS_START) {
+				PRINTF("next afterwards is FS_START\n");
 				if (change_file_magic(context, cur_header, 0))
 					return LILOTAFS_EFLASH;
 				cur_header = next_header;
 			}
 			// 3. complicated
 			if (next_header->magic == LILOTAFS_START_CLEAN) {
+				PRINTF("next afterwards is FS_START_CLEAN\n");
+
 				uint32_t cur_offset = (POINTER_SIZE) cur_header - (POINTER_SIZE) context->flash_mmap;
 				uint32_t next_offset = (POINTER_SIZE) next_header - (POINTER_SIZE) context->flash_mmap;
 
@@ -820,8 +837,12 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 			}
 		}
 	}
+	
+	PRINTF("cur_header %p flash_mmap %p\n", cur_header, context->flash_mmap);
 
 	context->fs_head = (POINTER_SIZE) cur_header - (POINTER_SIZE) context->flash_mmap;
+
+	PRINTF("fs_head 0x%lx\n", (POINTER_SIZE) context->fs_head);
 
 	// scan until no more files -- set that to tail pointer
 	struct scan_headers_result scan_result = scan_headers(context, cur_header, get_partition_size(ctx));
@@ -1044,6 +1065,7 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 
 	// if we find wear marker, need to perform wear leveling
 	if (wear_marker) {
+		printf("wear marker\n");
 		int code = wear_level_compact(context, wear_marker, num_files);
 		if (code != LILOTAFS_SUCCESS)
 			return code;
@@ -1052,6 +1074,7 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 		PRINTF("new tail = 0x%lx\n", (POINTER_SIZE) context->fs_tail);
 	}
 
+	PRINTF("mount complete\n");
 	return LILOTAFS_SUCCESS;
 }
 
@@ -1101,55 +1124,68 @@ int fd_list_add(void *ctx, struct lilotafs_file_descriptor fd) {
 	return context->fd_list_size - 1;
 }
 
-int lilotafs_open_errno(void *ctx) {
+bool check_fd(const struct lilotafs_context *context, int fd) {
+	fd--;
+	return fd >= context->fd_list_size && context->fd_list[fd].in_use;
+}
+
+int lilotafs_errno(void *ctx) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
-	return context->vfs_open_error;
+	return context->errno;
 }
 
 int lilotafs_open(void *ctx, const char *name, int flags, int mode) {
+	(void) (mode);
+
+	// PRINTF("looking for file %s\n", name);
+
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
 	uint32_t filename_len = strlen(name);
 	if (filename_len > LILOTAFS_MAX_FILENAME_LEN) {
-		context->vfs_open_error = LILOTAFS_EINVAL;
+		context->errno = LILOTAFS_EINVAL;
 		return -1;
 	}
 
 	struct lilotafs_rec_header *file_found = find_file_name(context, name);
 
+	// PRINTF("found? %p\n", file_found);
+
 	struct lilotafs_file_descriptor fd = {
 		.in_use = true,
-		.offset = UINT32_MAX,
+		.position = UINT32_MAX,
+		.offset = 0,
+		.flags = flags,
 	};
 
 	if (!file_found) {
 		if ((flags & LILOTAFS_CREATE) != LILOTAFS_CREATE) {
-			context->vfs_open_error = LILOTAFS_ENOENT;
+			context->errno = LILOTAFS_ENOENT;
 			return -1;
 		}
-		uint32_t code = append_file(context, name, &fd.offset, NULL, 0, LILOTAFS_STATUS_COMMITTED, true);
+		uint32_t code = append_file(context, name, &fd.position, NULL, 0, LILOTAFS_STATUS_COMMITTED, true);
 		if (code != LILOTAFS_SUCCESS) {
-			context->vfs_open_error = code;
+			context->errno = code;
 			return -1;
 		}
-		file_found = (struct lilotafs_rec_header *) (context->flash_mmap + fd.offset);
+		file_found = (struct lilotafs_rec_header *) (context->flash_mmap + fd.position);
 	}
 
-	fd.offset = (POINTER_SIZE) file_found - (POINTER_SIZE) context->flash_mmap;
+	fd.position = (POINTER_SIZE) file_found - (POINTER_SIZE) context->flash_mmap;
 
 	int fd_index = fd_list_add(context, fd);
 	if (fd_index == -1) {
-		context->vfs_open_error = LILOTAFS_EUNKNOWN;
+		context->errno = LILOTAFS_EUNKNOWN;
 		return -1;
 	}
-
+	
 	return fd_index + 1;
 }
 
 int lilotafs_close(void *ctx, int fd) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
-	if (fd - 1 >= context->fd_list_size)
+	if (check_fd(context, fd))
 		return LILOTAFS_EBADF;
 
 	fd--;
@@ -1157,22 +1193,22 @@ int lilotafs_close(void *ctx, int fd) {
 		return -1;
 
 	context->fd_list[fd].in_use = false;
-	context->fd_list[fd].offset = 0;
+	context->fd_list[fd].position = 0;
 
 	return 0;
 }
 
-int lilotafs_write(void *ctx, int fd, void *buffer, uint32_t len) {
+ssize_t lilotafs_write(void *ctx, int fd, const void *buffer, unsigned int len) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
-	if (fd - 1 >= context->fd_list_size)
+	if (check_fd(context, fd))
 		return LILOTAFS_EBADF;
 
 	struct lilotafs_file_descriptor *descriptor = &context->fd_list[fd - 1];
-	struct lilotafs_rec_header *header = (struct lilotafs_rec_header *) (context->flash_mmap + descriptor->offset);
+	struct lilotafs_rec_header *header = (struct lilotafs_rec_header *) (context->flash_mmap + descriptor->position);
 	char *filename = (char *) header + sizeof(struct lilotafs_rec_header);
 
-	int code = append_file(context, filename, &descriptor->offset, buffer, len, LILOTAFS_STATUS_COMMITTED, true);
+	int code = append_file(context, filename, &descriptor->position, buffer, len, LILOTAFS_STATUS_COMMITTED, true);
 	if (code != LILOTAFS_SUCCESS)
 		return code;
 
@@ -1192,41 +1228,70 @@ int lilotafs_write(void *ctx, int fd, void *buffer, uint32_t len) {
 int lilotafs_get_size(void *ctx, int fd) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
-	if (fd - 1 >= context->fd_list_size)
-		return LILOTAFS_EBADF;
+	if (check_fd(context, fd)) {
+		context->errno = LILOTAFS_EBADF;
+		return -1;
+	}
 
 	struct lilotafs_file_descriptor descriptor = context->fd_list[fd - 1];
-	struct lilotafs_rec_header *header = (struct lilotafs_rec_header *) (context->flash_mmap + descriptor.offset);
+	struct lilotafs_rec_header *header = (struct lilotafs_rec_header *) (context->flash_mmap + descriptor.position);
 	return header->data_len;
 }
 
-// TODO: add lseek
-int lilotafs_read(void *ctx, int fd, void *buffer, uint32_t len) {
+ssize_t lilotafs_read(void *ctx, int fd, void *buffer, size_t len) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
-	if (fd - 1 >= context->fd_list_size)
-		return LILOTAFS_EBADF;
+	if (check_fd(context, fd)) {
+		context->errno = LILOTAFS_EBADF;
+		return -1;
+	}
 
 	struct lilotafs_file_descriptor descriptor = context->fd_list[fd - 1];
 
-	char *filename = (char *) context->flash_mmap + descriptor.offset + sizeof(struct lilotafs_rec_header);
-	uint32_t data_offset = descriptor.offset + sizeof(struct lilotafs_rec_header) + strlen(filename) + 1;
+	char *filename = (char *) context->flash_mmap + descriptor.position + sizeof(struct lilotafs_rec_header);
+	uint32_t data_offset = descriptor.position + sizeof(struct lilotafs_rec_header) + strlen(filename) + 1;
 	data_offset = lilotafs_align_up_32(data_offset, LILOTAFS_DATA_ALIGN);
 	uint8_t *data_start = (uint8_t *) context->flash_mmap + data_offset;
 
-	memcpy(buffer, data_start, len);
+	memcpy(buffer, data_start + descriptor.offset, len);
 
-	return LILOTAFS_SUCCESS;
+	return len;
+}
+
+off_t lilotafs_lseek(void *ctx, int fd, off_t offset, int whence) {
+	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
+
+	if (check_fd(context, fd))
+		return LILOTAFS_EBADF;
+
+	struct lilotafs_file_descriptor *descriptor = &context->fd_list[fd - 1];
+	if (whence == LILOTAFS_SEEK_SET)
+		descriptor->offset = offset;
+	else if (whence == LILOTAFS_SEEK_CUR)
+		descriptor->offset += offset;
+	else if (whence == LILOTAFS_SEEK_END) {
+		int size = lilotafs_get_size(ctx, fd);
+		// get_size already sets errno on error
+		if (size == -1)
+			return -1;
+		descriptor->offset = size + offset;
+	}
+	else {
+		context->errno = LILOTAFS_EINVAL;
+		return -1;
+	}
+
+	return descriptor->offset;
 }
 
 int lilotafs_delete(void *ctx, int fd) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
-	if (fd - 1 >= context->fd_list_size)
+	if (check_fd(context, fd))
 		return LILOTAFS_EBADF;
 
 	struct lilotafs_file_descriptor descriptor = context->fd_list[fd - 1];
-	struct lilotafs_rec_header *header = (struct lilotafs_rec_header *) (context->flash_mmap + descriptor.offset);
+	struct lilotafs_rec_header *header = (struct lilotafs_rec_header *) (context->flash_mmap + descriptor.position);
 	if (change_file_status(context, header, LILOTAFS_STATUS_DELETED))
 		return LILOTAFS_EFLASH;
 

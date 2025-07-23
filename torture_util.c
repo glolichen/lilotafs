@@ -16,7 +16,7 @@
 extern jmp_buf lfs_mount_jmp_buf;
 
 uint32_t alternate_content_file = UINT32_MAX;
-uint32_t alternate_content_size = 0; 
+int alternate_content_size = 0; 
 uint8_t *alternate_content = NULL;
 
 // returns the number of files that are wrong
@@ -32,7 +32,9 @@ uint32_t inspect_fs(struct lilotafs_context *ctx, struct table_entry *files) {
 			continue;
 		}
 
-		uint32_t actual_size = lilotafs_get_size(ctx, fd);
+		int actual_size = lilotafs_lseek(ctx, fd, 0, LILOTAFS_SEEK_END);
+		lilotafs_lseek(ctx, fd, 0, LILOTAFS_SEEK_SET);
+
 		uint8_t *file_content = (uint8_t *) calloc(actual_size, sizeof(uint8_t));
 		if (!file_content) {
 			PRINTF("inspect: file %s: malloc fail\n", filename);
@@ -40,8 +42,8 @@ uint32_t inspect_fs(struct lilotafs_context *ctx, struct table_entry *files) {
 			continue;
 		}
 
-		uint32_t code = lilotafs_read(ctx, fd, file_content, actual_size);
-		if (code != LILOTAFS_SUCCESS) {
+		int read_bytes = lilotafs_read(ctx, fd, file_content, actual_size);
+		if (read_bytes == -1) {
 			PRINTF("inspect: file %s: read fail\n", filename);
 			total_wrong++;
 			free(file_content);
@@ -157,7 +159,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 		int code;
 		PRINTF("main loop: step %u\n", op);
 
-		if (op == 1526)
+		if (op == 639)
 			printf("\n");
 
 		if (setjmp(lfs_mount_jmp_buf) == 0)
@@ -177,7 +179,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 				uint32_t fd = lilotafs_open(&ctx, files[i].filename, LILOTAFS_WRITABLE | LILOTAFS_READABLE | LILOTAFS_CREATE, 0);
 				if (fd == (uint32_t) -1) {
 					PRINTF("crash inject: file %s: can't open\n", files[i].filename);
-					error_code = lilotafs_open_errno(&ctx);
+					error_code = lilotafs_errno(&ctx);
 					goto cleanup;
 				}
 				fds[i] = fd;
@@ -236,7 +238,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 				uint32_t fd = lilotafs_open(&ctx, files[i].filename, LILOTAFS_WRITABLE | LILOTAFS_READABLE | LILOTAFS_CREATE, 0);
 				if (fd == (uint32_t) -1) {
 					PRINTF("wear level: file %s: can't open\n", files[i].filename);
-					error_code = lilotafs_open_errno(&ctx);
+					error_code = lilotafs_errno(&ctx);
 					free(random);
 					goto cleanup;
 				}

@@ -5,7 +5,7 @@
 
 struct table_entry {
 	char *filename;
-	uint32_t content_size;
+	int content_size;
 	uint8_t *content;
 };
 

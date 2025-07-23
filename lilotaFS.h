@@ -4,7 +4,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#ifndef LILOTAFS_LOCAL
+#ifdef LILOTAFS_LOCAL
+#include <sys/mman.h>
+#include <sys/types.h>
+#else
 #include "esp_partition.h"
 #endif
 
@@ -41,6 +44,10 @@ ALIGN_UP_FUNC(64)
 #define LILOTAFS_CREATE 1
 #define LILOTAFS_READABLE 2
 #define LILOTAFS_WRITABLE 4
+	
+#define LILOTAFS_SEEK_SET 1
+#define LILOTAFS_SEEK_CUR 2
+#define LILOTAFS_SEEK_END 4
 
 enum lilotafs_record_status {
 	LILOTAFS_STATUS_ERASED = 0xFF, // 11111111
@@ -72,7 +79,7 @@ struct lilotafs_context {
 	uint32_t fs_head, fs_tail;
 	uint32_t largest_file_size, largest_filename_len;
 	bool has_wear_marker;
-	int vfs_open_error;
+	int errno;
 	int fd_list_size, fd_list_capacity;
 	struct lilotafs_file_descriptor *fd_list;
 };
@@ -85,7 +92,9 @@ struct lilotafs_rec_header {
 
 struct lilotafs_file_descriptor {
 	bool in_use;
-	uint32_t offset;
+	uint32_t position;
+	off_t offset;
+	int flags;
 };
 
 uint32_t lilotafs_unmount(void *ctx);
@@ -95,13 +104,13 @@ int lilotafs_mount(void *ctx, uint32_t partition_size, int fd);
 int lilotafs_mount(void *ctx, const esp_partition_t *partition);
 #endif
 
-int lilotafs_open_errno(void *ctx);
+int lilotafs_errno(void *ctx);
 
 int lilotafs_open(void *ctx, const char *name, int flags, int mode);
 int lilotafs_close(void *ctx, int fd);
-int lilotafs_write(void *ctx, int fd, void *buffer, uint32_t len);
-int lilotafs_get_size(void *ctx, int fd);
-int lilotafs_read(void *ctx, int fd, void *buffer, uint32_t len);
+ssize_t lilotafs_write(void *ctx, int fd, const void *buffer, unsigned int len);
+ssize_t lilotafs_read(void *ctx, int fd, void *buffer, size_t len);
+off_t lilotafs_lseek(void *ctx, int fd, off_t offset, int whence);
 int lilotafs_delete(void *ctx, int fd);
 
 uint32_t lilotafs_count_files(void *ctx);
