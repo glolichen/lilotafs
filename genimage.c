@@ -1,0 +1,91 @@
+#ifndef LILOTAFS_LOCAL
+#define LILOTAFS_LOCAL
+#define DISK_SIZE 2
+#endif
+
+#ifdef LILOTAFS_LOCAL
+// #ifndef LILOTAFS_LOCAL
+
+#include <stdint.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <string.h>
+#include <sys/types.h>
+#include <dirent.h>
+#include <string.h>
+#include <stdio.h>
+#include <sys/stat.h>
+
+#include "lilotaFS.h"
+
+char *remove_prefix(const char *filename, int prefix_length) {
+	int abs_strlen = strlen(filename);
+	int rel_strlen = abs_strlen - prefix_length;
+	char *rel_filename = (char *) malloc((rel_strlen + 1) * sizeof(char));
+	for (int i = 0; i < rel_strlen; i++)
+		rel_filename[i] = filename[prefix_length + i];
+	rel_filename[rel_strlen] = 0;
+	return rel_filename;
+}
+
+int main(int argc, char *argv[]) {
+	if (argc < 3)
+		return 1;
+
+	const char *disk_name = argv[1];
+	int disk = open(disk_name, O_RDWR);
+
+	struct lilotafs_context ctx;
+	memset(&ctx, 0, sizeof(struct lilotafs_context));
+
+	int err = lilotafs_mount(&ctx, DISK_SIZE, disk);
+	if (err != LILOTAFS_SUCCESS)
+		return err;
+	
+	printf("formatting disk %s, size %d\n", disk_name, DISK_SIZE);
+	
+	int prefix_length = atoi(argv[2]) - 1;
+	struct stat info;
+	for (int i = 3; i < argc; i++) {
+		const char *filename = argv[i];
+		char *rel_filename = remove_prefix(filename, prefix_length);
+
+		stat(filename, &info);
+		uint8_t *file_data = (uint8_t *) calloc(info.st_size, sizeof(uint8_t));
+
+		FILE *fp = fopen(filename, "rb");
+		fread(file_data, info.st_size, 1, fp);
+
+		int lilotafs_fd = lilotafs_open(&ctx, rel_filename, LILOTAFS_CREATE | LILOTAFS_READABLE | LILOTAFS_WRITABLE, 0);
+		if (lilotafs_fd == -1) {
+			fclose(fp);
+			free(rel_filename);
+			free(file_data);
+			return lilotafs_open_errno(&ctx);
+		}
+		
+		err = lilotafs_write(&ctx, lilotafs_fd, file_data, info.st_size);
+		if (err != LILOTAFS_SUCCESS) {
+			fclose(fp);
+			free(rel_filename);
+			free(file_data);
+			return lilotafs_open_errno(&ctx);
+		}
+		
+		printf("    added file %s, size %ld\n", rel_filename, info.st_size);
+
+		lilotafs_close(&ctx, lilotafs_fd);
+		fclose(fp);
+		free(rel_filename);
+		free(file_data);
+	}
+	
+	err = lilotafs_unmount(&ctx);
+	if (err != LILOTAFS_SUCCESS)
+		return err;
+
+	return 0;
+}
+#endif

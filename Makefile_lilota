@@ -1,0 +1,18 @@
+CC=gcc
+CFLAGS=-I. -Wall -Wextra -O2 \
+		-D LILOTAFS_LOCAL -D SECTOR_SIZE=4096 \
+		-D DISK_SIZE=$(DISK_SIZE) \
+
+OBJ = lilotaFS.o flash.o
+
+build: clean genimage
+
+genimage: $(OBJ) genimage.o
+	dd if=/dev/zero bs=$(DISK_SIZE) count=1 | tr '\000' '\377' > $(DISK_NAME)
+	$(CC) -o genimage $^ $(CFLAGS)
+
+%.o: %.c
+	$(CC) -c -o $@ $< $(CFLAGS)
+
+clean:
+	rm -f genimage *.o $(DISK_NAME)

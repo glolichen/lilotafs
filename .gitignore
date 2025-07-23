@@ -3,5 +3,6 @@
 test
 gen_test_disk
 torture
+genimage
 *.bin
 lilotaFS_ai.c
