@@ -1,13 +1,15 @@
 [
   {
     "arguments": [
-      "/usr/bin/gcc",
+      "/usr/bin/clang",
       "-c",
       "-I.",
       "-D",
       "TOTAL_SIZE=2097152",
       "-D",
       "SECTOR_SIZE=4096",
+      "-D",
+      "LILOTAFS_LOCAL",
       "-Wall",
       "-Wextra",
       "-g",
@@ -17,41 +19,21 @@
       "lilotaFS.o",
       "lilotaFS.c"
     ],
-    "directory": "/home/jayden/lilotaFS",
-    "file": "/home/jayden/lilotaFS/lilotaFS.c",
-    "output": "/home/jayden/lilotaFS/lilotaFS.o"
+    "directory": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotaFS",
+    "file": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotaFS/lilotaFS.c",
+    "output": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotaFS/lilotaFS.o"
   },
   {
     "arguments": [
-      "/usr/bin/gcc",
+      "/usr/bin/clang",
       "-c",
       "-I.",
       "-D",
       "TOTAL_SIZE=2097152",
       "-D",
       "SECTOR_SIZE=4096",
-      "-Wall",
-      "-Wextra",
-      "-g",
-      "-O0",
-      "-fsanitize=address,undefined",
-      "-o",
-      "flash.o",
-      "flash.c"
-    ],
-    "directory": "/home/jayden/lilotaFS",
-    "file": "/home/jayden/lilotaFS/flash.c",
-    "output": "/home/jayden/lilotaFS/flash.o"
-  },
-  {
-    "arguments": [
-      "/usr/bin/gcc",
-      "-c",
-      "-I.",
       "-D",
-      "TOTAL_SIZE=2097152",
-      "-D",
-      "SECTOR_SIZE=4096",
+      "LILOTAFS_LOCAL",
       "-Wall",
       "-Wextra",
       "-g",
@@ -61,30 +43,8 @@
       "torture_util.o",
       "torture_util.c"
     ],
-    "directory": "/home/jayden/lilotaFS",
-    "file": "/home/jayden/lilotaFS/torture_util.c",
-    "output": "/home/jayden/lilotaFS/torture_util.o"
-  },
-  {
-    "arguments": [
-      "/usr/bin/gcc",
-      "-c",
-      "-I.",
-      "-D",
-      "TOTAL_SIZE=2097152",
-      "-D",
-      "SECTOR_SIZE=4096",
-      "-Wall",
-      "-Wextra",
-      "-g",
-      "-O0",
-      "-fsanitize=address,undefined",
-      "-o",
-      "test.o",
-      "test.c"
-    ],
-    "directory": "/home/jayden/lilotaFS",
-    "file": "/home/jayden/lilotaFS/test.c",
-    "output": "/home/jayden/lilotaFS/test.o"
+    "directory": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotaFS",
+    "file": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotaFS/torture_util.c",
+    "output": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotaFS/torture_util.o"
   }
 ]

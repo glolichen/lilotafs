@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-#define PRINT_STUFF
+// #define PRINT_STUFF
 // #define PRINT_FREE
 
 #define FILE_COUNT 60
@@ -11,6 +11,7 @@
 
 #define MIN_SIZE 5
 #define MAX_SIZE 9000
+
 // #define MIN_SIZE 0
 // #define MAX_SIZE 0
 

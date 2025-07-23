@@ -1,3 +1,4 @@
+#ifdef LILOTAFS_LOCAL
 #include "flash.h"
 
 #include <stdint.h>
@@ -37,8 +38,7 @@ int main(int argc, char *argv[]) {
 	struct lilotafs_context ctx;
 	memset(&ctx, 0, sizeof(struct lilotafs_context));
 
-	lilotafs_test_set_file(&ctx, disk);
-	printf("mount: %u\n", lilotafs_mount(&ctx));
+	printf("mount: %u\n", lilotafs_mount(&ctx, TOTAL_SIZE, disk));
 
 	char input[101];
 	char *token;
@@ -106,7 +106,7 @@ int main(int argc, char *argv[]) {
 		// printf("filename = %.63s\n", filename);
 
 		if (mode == 'o') {
-			uint32_t ret_fd = lilotafs_open(&ctx, filename, LILOTAFS_READABLE | LILOTAFS_WRITABLE | (flag ? LILOTAFS_CREATE : 0));
+			uint32_t ret_fd = lilotafs_open(&ctx, filename, LILOTAFS_READABLE | LILOTAFS_WRITABLE | (flag ? LILOTAFS_CREATE : 0), 0);
 			printf("open file %.63s fd: %u\n", filename, ret_fd);
 		}
 		else if (mode == 'c') {
@@ -194,3 +194,4 @@ int main(int argc, char *argv[]) {
 
 	return 0;
 }
+#endif

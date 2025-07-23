@@ -1,3 +1,4 @@
+#ifdef LILOTAFS_LOCAL
 #include "torture_util.h"
 
 #include <string.h>
@@ -24,7 +25,7 @@ uint32_t inspect_fs(struct lilotafs_context *ctx, struct table_entry *files) {
 	for (uint32_t i = 0; i < FILE_COUNT; i++) {
 		char *filename = files[i].filename;
 
-		uint32_t fd = lilotafs_open(ctx, filename, LILOTAFS_READABLE | LILOTAFS_WRITABLE);
+		uint32_t fd = lilotafs_open(ctx, filename, LILOTAFS_READABLE | LILOTAFS_WRITABLE, 0);
 		if (fd == (uint32_t) -1) {
 			PRINTF("inspect: file %s: can't open\n", filename);
 			total_wrong++;
@@ -39,7 +40,7 @@ uint32_t inspect_fs(struct lilotafs_context *ctx, struct table_entry *files) {
 			continue;
 		}
 
-		uint32_t code = lilotafs_read(ctx, fd, file_content, 0, actual_size);
+		uint32_t code = lilotafs_read(ctx, fd, file_content, actual_size);
 		if (code != LILOTAFS_SUCCESS) {
 			PRINTF("inspect: file %s: read fail\n", filename);
 			total_wrong++;
@@ -110,9 +111,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 	struct lilotafs_context ctx;
 	memset(&ctx, 0, sizeof(struct lilotafs_context));
 
-	lilotafs_test_set_file(&ctx, disk);
-
-	PRINTF("mount: %u\n", lilotafs_mount(&ctx));
+	PRINTF("mount: %u\n", lilotafs_mount(&ctx, TOTAL_SIZE, disk)); 
 
 	struct table_entry files[FILE_COUNT];
 	uint32_t fds[FILE_COUNT];
@@ -129,7 +128,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 		files[i].content_size = 0;
 		files[i].content = NULL;
 
-		uint32_t fd = lilotafs_open(&ctx, files[i].filename, LILOTAFS_WRITABLE | LILOTAFS_READABLE | LILOTAFS_CREATE);
+		uint32_t fd = lilotafs_open(&ctx, files[i].filename, LILOTAFS_WRITABLE | LILOTAFS_READABLE | LILOTAFS_CREATE, 0);
 		if (fd == (uint32_t) -1) {
 			PRINTF("populate: file %s: can't open\n", files[i].filename);
 			return 1;
@@ -155,7 +154,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 		for (uint32_t i = 0; i < random_size; i++)
 			random[i] = RANDOM_NUMBER(0, 255);
 
-		uint32_t code;
+		int code;
 		PRINTF("main loop: step %u\n", op);
 
 		if (op == 1526)
@@ -172,11 +171,10 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 			flash_set_crash(CRASH_WRITE_MIN_MOVES, CRASH_WRITE_MAX_MOVES, CRASH_ERASE_MIN_MOVES, CRASH_ERASE_MAX_MOVES);
 
 			lilotafs_unmount(&ctx);
-			lilotafs_test_set_file(&ctx, disk);
-			lilotafs_mount(&ctx);
+			lilotafs_mount(&ctx, TOTAL_SIZE, disk); 
 
 			for (uint32_t i = 0; i < FILE_COUNT; i++) {
-				uint32_t fd = lilotafs_open(&ctx, files[i].filename, LILOTAFS_WRITABLE | LILOTAFS_READABLE | LILOTAFS_CREATE);
+				uint32_t fd = lilotafs_open(&ctx, files[i].filename, LILOTAFS_WRITABLE | LILOTAFS_READABLE | LILOTAFS_CREATE, 0);
 				if (fd == (uint32_t) -1) {
 					PRINTF("crash inject: file %s: can't open\n", files[i].filename);
 					error_code = lilotafs_open_errno(&ctx);
@@ -226,9 +224,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 				goto cleanup;
 			}
 
-			lilotafs_test_set_file(&ctx, disk);
-
-			remount_code = lilotafs_mount(&ctx);
+			remount_code = lilotafs_mount(&ctx, TOTAL_SIZE, disk); 
 			if (remount_code != LILOTAFS_SUCCESS) {
 				PRINTF("wear level: file %s: unmount error %u\n", files[file].filename, remount_code);
 				error_code = remount_code;
@@ -237,7 +233,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 			}
 
 			for (uint32_t i = 0; i < FILE_COUNT; i++) {
-				uint32_t fd = lilotafs_open(&ctx, files[i].filename, LILOTAFS_WRITABLE | LILOTAFS_READABLE | LILOTAFS_CREATE);
+				uint32_t fd = lilotafs_open(&ctx, files[i].filename, LILOTAFS_WRITABLE | LILOTAFS_READABLE | LILOTAFS_CREATE, 0);
 				if (fd == (uint32_t) -1) {
 					PRINTF("wear level: file %s: can't open\n", files[i].filename);
 					error_code = lilotafs_open_errno(&ctx);
@@ -296,3 +292,4 @@ cleanup:
 	return 1;
 }
 
+#endif
