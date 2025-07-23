@@ -25,15 +25,15 @@ uint32_t inspect_fs(struct lilotafs_context *ctx, struct table_entry *files) {
 	for (uint32_t i = 0; i < FILE_COUNT; i++) {
 		char *filename = files[i].filename;
 
-		uint32_t fd = lilotafs_open(ctx, filename, LILOTAFS_READABLE | LILOTAFS_WRITABLE, 0);
-		if (fd == (uint32_t) -1) {
+		int fd = lilotafs_open(ctx, filename, LILOTAFS_READABLE | LILOTAFS_WRITABLE, 0);
+		if (fd == -1) {
 			PRINTF("inspect: file %s: can't open\n", filename);
 			total_wrong++;
 			continue;
 		}
 
-		int actual_size = lilotafs_lseek(ctx, fd, 0, LILOTAFS_SEEK_END);
-		lilotafs_lseek(ctx, fd, 0, LILOTAFS_SEEK_SET);
+		int actual_size = lilotafs_lseek(ctx, fd, 0, SEEK_END);
+		lilotafs_lseek(ctx, fd, 0, SEEK_SET);
 
 		uint8_t *file_content = (uint8_t *) calloc(actual_size, sizeof(uint8_t));
 		if (!file_content) {
@@ -113,7 +113,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 	struct lilotafs_context ctx;
 	memset(&ctx, 0, sizeof(struct lilotafs_context));
 
-	PRINTF("mount: %u\n", lilotafs_mount(&ctx, TOTAL_SIZE, disk)); 
+	PRINTF("mount: %d\n", lilotafs_mount(&ctx, TOTAL_SIZE, disk)); 
 
 	struct table_entry files[FILE_COUNT];
 	uint32_t fds[FILE_COUNT];
@@ -123,15 +123,18 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 	for (uint32_t i = 0; i < FILE_COUNT; i++) {
 		uint32_t filename_len = RANDOM_NUMBER(10, 63);
 		files[i].filename = (char *) malloc(filename_len + 1);
-		for (uint32_t j = 0; j < filename_len; j++)
-			files[i].filename[j] = RANDOM_NUMBER(33, 126);
+		for (uint32_t j = 0; j < filename_len; j++) {
+			do {
+				files[i].filename[j] = RANDOM_NUMBER(33, 126);
+			} while (files[i].filename[j] == '/');
+		}
 		files[i].filename[filename_len] = 0;
 
 		files[i].content_size = 0;
 		files[i].content = NULL;
 
-		uint32_t fd = lilotafs_open(&ctx, files[i].filename, LILOTAFS_WRITABLE | LILOTAFS_READABLE | LILOTAFS_CREATE, 0);
-		if (fd == (uint32_t) -1) {
+		int fd = lilotafs_open(&ctx, files[i].filename, LILOTAFS_WRITABLE | LILOTAFS_READABLE | LILOTAFS_CREATE, 0);
+		if (fd == -1) {
 			PRINTF("populate: file %s: can't open\n", files[i].filename);
 			return 1;
 		}
@@ -140,7 +143,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 
 	flash_set_crash(CRASH_WRITE_MIN_MOVES, CRASH_WRITE_MAX_MOVES, CRASH_ERASE_MIN_MOVES, CRASH_ERASE_MAX_MOVES);
 
-	uint32_t total_wrong = 0, error_code = 0;
+	int total_wrong = 0, error_code = 0;
 	for (uint32_t op = 0; op < OP_COUNT; op++) {
 		uint32_t file = RANDOM_NUMBER(0, FILE_COUNT - 1);
 		uint32_t fd = fds[file];
@@ -218,9 +221,9 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 		if (code == LILOTAFS_ENOSPC || (code == LILOTAFS_SUCCESS && op % OPS_PER_REMOUNT == 0 && op != 0)) {
 			PRINTF("\n\n=============== UNMOUNT/REMOUNT ===============\n");
 
-			uint32_t remount_code = lilotafs_unmount(&ctx);
+			int remount_code = lilotafs_unmount(&ctx);
 			if (remount_code != LILOTAFS_SUCCESS) {
-				PRINTF("wear level: file %s: unmount error %u\n", files[file].filename, remount_code);
+				PRINTF("wear level: file %s: unmount error %d\n", files[file].filename, remount_code);
 				error_code = remount_code;
 				free(random);
 				goto cleanup;
@@ -235,8 +238,8 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 			}
 
 			for (uint32_t i = 0; i < FILE_COUNT; i++) {
-				uint32_t fd = lilotafs_open(&ctx, files[i].filename, LILOTAFS_WRITABLE | LILOTAFS_READABLE | LILOTAFS_CREATE, 0);
-				if (fd == (uint32_t) -1) {
+				int fd = lilotafs_open(&ctx, files[i].filename, LILOTAFS_WRITABLE | LILOTAFS_READABLE | LILOTAFS_CREATE, 0);
+				if (fd == -1) {
 					PRINTF("wear level: file %s: can't open\n", files[i].filename);
 					error_code = lilotafs_errno(&ctx);
 					free(random);
@@ -283,11 +286,11 @@ cleanup:
 
 	fprintf(stderr, "SEED: %lu\n", seed);
 	if (error_code) {
-		fprintf(stderr, "ERROR CODE: %u\n", error_code);
+		fprintf(stderr, "ERROR CODE: %d\n", error_code);
 		return error_code;
 	}
 	if (total_wrong) {
-		fprintf(stderr, "FINAL WRONG TOTAL: %u\n", total_wrong);
+		fprintf(stderr, "FINAL WRONG TOTAL: %d\n", total_wrong);
 		return total_wrong;
 	}
 

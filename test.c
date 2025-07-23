@@ -38,7 +38,7 @@ int main(int argc, char *argv[]) {
 	struct lilotafs_context ctx;
 	memset(&ctx, 0, sizeof(struct lilotafs_context));
 
-	printf("mount: %u\n", lilotafs_mount(&ctx, TOTAL_SIZE, disk));
+	printf("mount: %d\n", lilotafs_mount(&ctx, TOTAL_SIZE, disk));
 
 	char input[101];
 	char *token;
@@ -106,16 +106,16 @@ int main(int argc, char *argv[]) {
 		// printf("filename = %.63s\n", filename);
 
 		if (mode == 'o') {
-			uint32_t ret_fd = lilotafs_open(&ctx, filename, LILOTAFS_READABLE | LILOTAFS_WRITABLE | (flag ? LILOTAFS_CREATE : 0), 0);
-			printf("open file %.63s fd: %u\n", filename, ret_fd);
+			int ret_fd = lilotafs_open(&ctx, filename, LILOTAFS_READABLE | LILOTAFS_WRITABLE | (flag ? LILOTAFS_CREATE : 0), 0);
+			printf("open file %.63s fd: %d\n", filename, ret_fd);
 		}
 		else if (mode == 'c') {
-			uint32_t result = lilotafs_close(&ctx, fd);
-			printf("close fd %u: %u\n", fd, result);
+			int result = lilotafs_close(&ctx, fd);
+			printf("close fd %d: %d\n", fd, result);
 		}
 		else if (mode == 'd') {
-			uint32_t result = lilotafs_delete(&ctx, fd);
-			printf("delete fd %u: %u\n", fd, result);
+			int result = lilotafs_delete(&ctx, fd);
+			printf("delete fd %d: %d\n", fd, result);
 
 		}
 		else if (mode == 'w' || mode == 'W') {
@@ -124,7 +124,7 @@ int main(int argc, char *argv[]) {
 			for (uint32_t i = 0; i < size; i++)
 				data[i] = mode == 'W' ? RANDOM_NUMBER(0, 255) : 0xFF;
 			uint32_t result = lilotafs_write(&ctx, fd, data, size);
-			printf("write %u bytes to fd %u: %u\n", size, fd, result);
+			printf("write %u bytes to fd %d: %d\n", size, fd, result);
 			free(data);
 		}
 		else if (mode == 'q') {
