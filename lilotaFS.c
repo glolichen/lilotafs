@@ -213,9 +213,16 @@ struct scan_headers_result {
 	return ret;
 }
 
-int check_free_space(void *ctx, uint32_t current_offset,
-						  uint32_t write_offset, uint32_t filename_len, uint32_t len) {
+uint32_t calculate_total_file_size(uint32_t filename_len, uint32_t data_len) {
+	uint32_t new_file_total = sizeof(struct lilotafs_rec_header) + filename_len + 1;
+	new_file_total = lilotafs_align_up_32(new_file_total, LILOTAFS_DATA_ALIGN);
+	new_file_total += data_len;
+	new_file_total = lilotafs_align_up_32(new_file_total, LILOTAFS_HEADER_ALIGN);
+	return new_file_total;
+}
 
+// the total_size_size includes the header, filename and datalen
+int check_free_space(void *ctx, uint32_t current_offset, uint32_t write_offset, uint32_t total_file_size) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
 	uint32_t partition_size = get_partition_size(context);
@@ -257,11 +264,6 @@ int check_free_space(void *ctx, uint32_t current_offset,
 		old_file_total = lilotafs_align_up_32(old_file_total, LILOTAFS_HEADER_ALIGN);
 	}
 
-	uint32_t new_file_total = sizeof(struct lilotafs_rec_header) + filename_len + 1;
-	new_file_total = lilotafs_align_up_32(new_file_total, LILOTAFS_DATA_ALIGN);
-	new_file_total += len;
-	new_file_total = lilotafs_align_up_32(new_file_total, LILOTAFS_HEADER_ALIGN);
-
 	uint32_t wrap_marker_total = sizeof(struct lilotafs_rec_header);
 	wrap_marker_total = lilotafs_align_up_32(wrap_marker_total, LILOTAFS_HEADER_ALIGN);
 
@@ -270,7 +272,7 @@ int check_free_space(void *ctx, uint32_t current_offset,
 	largest_file_total += context->largest_file_size;
 	largest_file_total = lilotafs_align_up_32(largest_file_total, LILOTAFS_HEADER_ALIGN);
 	// the current file we're writing might be larger than current largest
-	largest_file_total = u32_max(largest_file_total, u32_max(new_file_total, old_file_total));
+	largest_file_total = u32_max(largest_file_total, u32_max(total_file_size, old_file_total));
 
 	// hypothetical tail pointer if we added this file
 	// log_wrap indicates whether there is already a wear marker,
@@ -278,13 +280,13 @@ int check_free_space(void *ctx, uint32_t current_offset,
 	// the largest file twiec
 	bool log_wrap = context->fs_head >= context->fs_tail;
 	uint32_t current_position = write_offset;
-	if (new_file_total + wrap_marker_total > partition_size - current_position) {
+	if (total_file_size + wrap_marker_total > partition_size - current_position) {
 		if (log_wrap)
 			return LILOTAFS_ENOSPC;
 		log_wrap = true;
 		current_position = 0;
 	}
-	current_position += new_file_total;
+	current_position += total_file_size;
 	current_position = lilotafs_align_up_32(current_position, LILOTAFS_HEADER_ALIGN);
 
 	// check if we can write the old file
@@ -335,13 +337,14 @@ int append_file(void *ctx, const char *filename, uint32_t *current_offset,
 	uint32_t filename_len = strlen(filename);
 	uint32_t partition_size = get_partition_size(context);
 
-	if (check_free_space(context, *current_offset, context->fs_tail, filename_len, len))
+	uint32_t new_file_total = calculate_total_file_size(filename_len, len);
+	if (check_free_space(context, *current_offset, context->fs_tail, new_file_total))
 		return LILOTAFS_ENOSPC;
 
-	uint32_t new_file_total = sizeof(struct lilotafs_rec_header) + filename_len + 1;
-	new_file_total = lilotafs_align_up_32(new_file_total, LILOTAFS_DATA_ALIGN);
-	new_file_total += len;
-	new_file_total = lilotafs_align_up_32(new_file_total, LILOTAFS_HEADER_ALIGN);
+	// uint32_t new_file_total = sizeof(struct lilotafs_rec_header) + filename_len + 1;
+	// new_file_total = lilotafs_align_up_32(new_file_total, LILOTAFS_DATA_ALIGN);
+	// new_file_total += len;
+	// new_file_total = lilotafs_align_up_32(new_file_total, LILOTAFS_HEADER_ALIGN);
 
 	uint32_t wrap_marker_total = sizeof(struct lilotafs_rec_header);
 	wrap_marker_total = lilotafs_align_up_32(wrap_marker_total, LILOTAFS_HEADER_ALIGN);
