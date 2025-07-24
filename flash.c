@@ -91,6 +91,8 @@ int lilotafs_flash_write(struct lilotafs_context *ctx, const void *buffer, uint3
 		if (byte ^ current)
 			return 1;
 	}
+	
+	assert(0);
 
 	int err = esp_partition_write(ctx->partition, address, buffer, length);
 	if (err != ESP_OK)

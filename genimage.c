@@ -51,12 +51,18 @@ int main(int argc, char *argv[]) {
 		char *rel_filename = remove_prefix(filename, prefix_length);
 
 		stat(filename, &info);
+		// check for directory
+		if (!S_ISREG(info.st_mode)) {
+			free(rel_filename);
+			continue;
+		}
+
 		uint8_t *file_data = (uint8_t *) calloc(info.st_size, sizeof(uint8_t));
 
 		FILE *fp = fopen(filename, "rb");
 		fread(file_data, info.st_size, 1, fp);
 
-		int lilotafs_fd = lilotafs_open(&ctx, rel_filename, LILOTAFS_CREATE | LILOTAFS_READABLE | LILOTAFS_WRITABLE, 0);
+		int lilotafs_fd = lilotafs_open(&ctx, rel_filename, O_WRONLY | O_CREAT, 0);
 		if (lilotafs_fd == -1) {
 			fclose(fp);
 			free(rel_filename);
@@ -65,7 +71,7 @@ int main(int argc, char *argv[]) {
 		}
 		
 		err = lilotafs_write(&ctx, lilotafs_fd, file_data, info.st_size);
-		if (err != LILOTAFS_SUCCESS) {
+		if (err != info.st_size) {
 			fclose(fp);
 			free(rel_filename);
 			free(file_data);

@@ -42,9 +42,6 @@ ALIGN_UP_FUNC(64)
 #define LILOTAFS_EUNKNOWN (-10) // ??? (...85)
 
 #define LILOTAFS_MAX_FILENAME_LEN 63
-#define LILOTAFS_CREATE 1
-#define LILOTAFS_READABLE 2
-#define LILOTAFS_WRITABLE 4
 	
 enum lilotafs_record_status {
 	LILOTAFS_STATUS_ERASED = 0xFF, // 11111111

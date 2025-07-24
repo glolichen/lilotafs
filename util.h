@@ -3,7 +3,7 @@
 
 #include <stdint.h>
 
-// #define PRINT_STUFF
+#define PRINT_STUFF
 // #define PRINT_FREE
 
 #define FILE_COUNT 60
@@ -36,7 +36,8 @@
 #define RANDOM_NUMBER(min, max) (rand() % ((max) - (min) + 1) + (min))
 #ifdef PRINT_STUFF
 #ifdef LILOTAFS_LOCAL
-#define PRINTF(format, ...) printf(format, ##__VA_ARGS__)
+#define PRINTF(format, ...) fprintf(stdout, format, ##__VA_ARGS__)
+// #define PRINTF(format, ...) fprintf(stderr, format, ##__VA_ARGS__)
 #else
 #define PRINTF(format, ...) printf("lilotafs: " format, ##__VA_ARGS__)
 #endif

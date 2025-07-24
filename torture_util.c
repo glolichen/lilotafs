@@ -28,7 +28,7 @@ uint32_t inspect_fs(struct lilotafs_context *ctx, struct table_entry *files) {
 
 		char *filename = files[i].filename;
 
-		int fd = lilotafs_open(ctx, filename, LILOTAFS_READABLE, 0);
+		int fd = lilotafs_open(ctx, filename, O_RDONLY, 0);
 		if (fd == -1) {
 			PRINTF("inspect: file %s: can't open\n", filename);
 			total_wrong++;
@@ -142,7 +142,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 	for (uint32_t op = 0; op < OP_COUNT; op++) {
 		uint32_t file = RANDOM_NUMBER(0, FILE_COUNT - 1);
 		
-		int fd = lilotafs_open(&ctx, files[file].filename, LILOTAFS_WRITABLE | LILOTAFS_CREATE, 0);
+		int fd = lilotafs_open(&ctx, files[file].filename, O_WRONLY | O_CREAT, 0);
 		files[file].opened = true;
 
 		int random_size = RANDOM_NUMBER(MIN_SIZE, MAX_SIZE);
