@@ -3,10 +3,11 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <sys/types.h>
+#include <dirent.h>
 
 #ifdef LILOTAFS_LOCAL
 #include <sys/mman.h>
-#include <sys/types.h>
 #else
 #include "esp_partition.h"
 #endif
@@ -89,6 +90,7 @@ struct lilotafs_rec_header {
 struct lilotafs_file_descriptor {
 	bool in_use;
 	uint32_t position;
+	uint32_t previous_position;
 	off_t offset;
 	int flags;
 };
@@ -104,10 +106,15 @@ int lilotafs_errno(void *ctx);
 
 int lilotafs_open(void *ctx, const char *name, int flags, int mode);
 int lilotafs_close(void *ctx, int fd);
+
 ssize_t lilotafs_write(void *ctx, int fd, const void *buffer, unsigned int len);
 ssize_t lilotafs_read(void *ctx, int fd, void *buffer, size_t len);
 off_t lilotafs_lseek(void *ctx, int fd, off_t offset, int whence);
 int lilotafs_delete(void *ctx, int fd);
+
+DIR *lilotafs_opendir(void *ctx, const char *name);
+struct dirent *lilotafs_readdir(void *ctx, DIR *pdir);
+int lilotafs_closedir(void *ctx, DIR *pdir);
 
 uint32_t lilotafs_count_files(void *ctx);
 

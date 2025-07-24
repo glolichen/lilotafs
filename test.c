@@ -106,8 +106,10 @@ int main(int argc, char *argv[]) {
 		// printf("filename = %.63s\n", filename);
 
 		if (mode == 'o') {
-			int ret_fd = lilotafs_open(&ctx, filename, LILOTAFS_READABLE | LILOTAFS_WRITABLE | (flag ? LILOTAFS_CREATE : 0), 0);
+			int ret_fd = lilotafs_open(&ctx, filename, flag, 0);
 			printf("open file %.63s fd: %d\n", filename, ret_fd);
+			if (ret_fd == -1)
+				printf("error: %d\n", lilotafs_errno(&ctx));
 		}
 		else if (mode == 'c') {
 			int result = lilotafs_close(&ctx, fd);
