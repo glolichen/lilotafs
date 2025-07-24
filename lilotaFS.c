@@ -913,7 +913,6 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 	context->fs_head = (POINTER_SIZE) cur_header - (POINTER_SIZE) context->flash_mmap;
 	
 	// scan until no more files -- set that to tail pointer
-	printf("%p %ld\n", context->flash_mmap, (POINTER_SIZE) get_partition_size(ctx));
 	struct scan_headers_result scan_result = scan_headers(ctx, cur_header, get_partition_size(ctx));
 	cur_header = scan_result.last_header;
 	num_files += scan_result.num_files;
@@ -1222,8 +1221,32 @@ char *remove_prefix_slash(const char *filename) {
 	return actual_name;
 }
 
+char *get_file_directory(const char *file) {
+	int filename_len = strlen(file);
+
+	int last_slash = -1;
+	for (int i = filename_len - 1; i >= 0; i--) {
+		if (file[i] == '/') {
+			last_slash = i;
+			break;
+		}
+	}
+
+	if (last_slash == -1)
+		return NULL;
+
+	// plus one for / character, plus one for null terminator
+	char *file_dir = (char *) malloc(last_slash + 2);
+	strncpy(file_dir, file, last_slash + 1);
+	file_dir[last_slash + 1] = 0;
+
+	return file_dir;
+}
+
 int lilotafs_open(void *ctx, const char *name, int flags, int mode) {
 	(void) mode;
+
+	printf("opening %s with flags %d\n", name, flags);
 	
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
@@ -1256,6 +1279,18 @@ int lilotafs_open(void *ctx, const char *name, int flags, int mode) {
 	}
 	
 	char *actual_name = remove_prefix_slash(name);
+
+	char *file_dir = get_file_directory(actual_name);
+	if (file_dir != NULL) {
+		struct lilotafs_rec_header *found_dir = find_file_name(ctx, file_dir, false);
+		free(file_dir);
+		if (found_dir == NULL) {
+			context->errno = LILOTAFS_ENOENT;
+			if (actual_name != name)
+				free(actual_name);
+			return -1;
+		}
+	}
 
 	// if we open an existing file for write,
 	// previous_position stores the location of the migrating file
@@ -1603,19 +1638,22 @@ int lilotafs_mkdir(void *ctx, const char *name, mode_t mode) {
 		}
 	}
 
-	char *name_slash = add_slash(name);
+	char *name_no_prefix = remove_prefix_slash(name);
+	char *actual_name = add_slash(name_no_prefix);
+	if (name_no_prefix != actual_name && name_no_prefix != name)
+		free(name_no_prefix);
 
 	uint32_t offset = UINT32_MAX;
-	int code = append_file(ctx, name_slash, &offset, NULL, 0, LILOTAFS_STATUS_COMMITTED, false);
+	int code = append_file(ctx, actual_name, &offset, NULL, 0, LILOTAFS_STATUS_COMMITTED, false);
 	if (code != LILOTAFS_SUCCESS) {
 		context->errno = code;
-		if (name_slash != name)
-			free(name_slash);
+		if (actual_name != name)
+			free(actual_name);
 		return -1;
 	}
 	
-	if (name_slash != name)
-		free(name_slash);
+	if (actual_name != name)
+		free(actual_name);
 
 	return 0;
 }
@@ -1661,11 +1699,6 @@ DIR *lilotafs_opendir(void *ctx, const char *name) {
 	return (DIR *) dir;
 }
 
-// https://stackoverflow.com/a/4770992
-bool startswith(const char *str, const char *prefix) {
-    return strncmp(prefix, str, strlen(prefix)) == 0;
-}
-
 // check if a file is "directly under" a directory and should be returned by readdir
 bool is_dir_child(const char *dir, const char *file) {
 	int filename_len = strlen(file);
@@ -1684,26 +1717,12 @@ bool is_dir_child(const char *dir, const char *file) {
 
 	// check that everything up to the last slash (including the slash)
 	// is equal to the directory
-	int last_slash = -1;
-	for (int i = filename_len - 1; i >= 0; i--) {
-		if (file[i] == '/') {
-			last_slash = i;
-			break;
-		}
-	}
-
-	if (last_slash == -1)
+	char *file_dir = get_file_directory(file);
+	if (file_dir == NULL)
 		return false;
 
-	// plus one for / character, plus one for null terminator
-	char *file_dir = (char *) malloc(last_slash + 2);
-	strncpy(file_dir, file, last_slash + 1);
-	file_dir[last_slash + 1] = 0;
-
 	int cmp = strcmp(dir, file_dir);
-
 	free(file_dir);
-
 	return cmp == 0;
 }
 

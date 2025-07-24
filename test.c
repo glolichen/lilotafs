@@ -19,7 +19,7 @@
 // d [fd]                 | delete file [fd]
 // c [fd]                 | close file [fd]
 // o [create?] [filename] | open file with name [filename], choose whether to create
-// q                      | query filesystem for information
+// i                      | query filesystem for information
 
 
 int main(int argc, char *argv[]) {
@@ -40,17 +40,30 @@ int main(int argc, char *argv[]) {
 
 	printf("mount: %d\n", lilotafs_mount(&ctx, TOTAL_SIZE, disk));
 
+	printf("read only: %d\n", O_RDONLY);
+	printf("write only: %d\n", O_WRONLY);
+	printf("write only and create: %d\n", O_WRONLY | O_CREAT);
+
+	// lilotafs_mkdir(&ctx, "/hello", 0);
+	// int file = lilotafs_open(&ctx, "hello/file.txt", 65, 0);
+	// if (file == -1) {
+	// 	printf("cannot open file: %d\n", lilotafs_errno(&ctx));
+	// }
+	// else {
+	// 	lilotafs_close(&ctx, file);
+	// }
+	//
 	// DIR *dir = lilotafs_opendir(&ctx, "sys/");
-	DIR *dir = lilotafs_opendir(&ctx, "//./");
-
-	while (1) {
-		struct dirent *de = lilotafs_readdir(&ctx, dir);
-		if (de == NULL)
-			break;
-		printf("%s\n", de->d_name);
-	}
-
-	lilotafs_closedir(&ctx, dir);
+	// DIR *dir = lilotafs_opendir(&ctx, "//./");
+	//
+	// while (1) {
+	// 	struct dirent *de = lilotafs_readdir(&ctx, dir);
+	// 	if (de == NULL)
+	// 		break;
+	// 	printf("%s\n", de->d_name);
+	// }
+	//
+	// lilotafs_closedir(&ctx, dir);
 
 	lilotafs_unmount(&ctx);
 
@@ -84,20 +97,25 @@ int main(int argc, char *argv[]) {
 		for (uint32_t i = 0; token != NULL; i++) {
 			if (i == 0) {
 				mode = input[0];
-				if (mode != 'o' && mode != 'r' && mode != 'w' && mode != 'd' && mode != 'c' && mode != 'q' && mode != 'W') {
+				if (mode == 'q') {
+					lilotafs_unmount(&ctx);
+					close(disk);
+					return 0;
+				}
+				if (mode != 'o' && mode != 'r' && mode != 'w' && mode != 'd' && mode != 'c' && mode != 'i' && mode != 'W') {
 					success = false;
 					break;
 				}
 			}
 
-			if (i == 1 && mode != 'q') {
+			if (i == 1 && mode != 'i') {
 				if (mode == 'o')
 					flag = strtoul(token, NULL, 0);
 				else
 					fd = strtoul(token, NULL, 0);
 			}
 
-			if (i == 2 && mode != 'o' && mode != 'c' && mode != 'q')
+			if (i == 2 && mode != 'o' && mode != 'c' && mode != 'i')
 				flag = strtoul(token, NULL, 0);
 
 			if (i >= 2 && mode == 'o') {
@@ -145,7 +163,7 @@ int main(int argc, char *argv[]) {
 			printf("write %u bytes to fd %d: %d\n", size, fd, result);
 			free(data);
 		}
-		else if (mode == 'q') {
+		else if (mode == 'i') {
 			uint32_t count = lilotafs_count_files(&ctx);
 			uint32_t largest_file = lilotafs_get_largest_file_size(&ctx);
 			uint32_t largest_filename_len = lilotafs_get_largest_filename_len(&ctx);
