@@ -53,6 +53,19 @@ int main(int argc, char *argv[]) {
 		stat(filename, &info);
 		// check for directory
 		if (!S_ISREG(info.st_mode)) {
+			// skip "." directory
+			if (strlen(rel_filename) == 0) {
+				free(rel_filename);
+				continue;
+			}
+
+			err = lilotafs_mkdir(&ctx, rel_filename, 0);
+			if (err != 0) {
+				free(rel_filename);
+				return lilotafs_errno(&ctx);
+			}
+
+			printf("    added directory %s %lu\n", rel_filename, strlen(rel_filename));
 			free(rel_filename);
 			continue;
 		}

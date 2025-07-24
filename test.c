@@ -40,6 +40,22 @@ int main(int argc, char *argv[]) {
 
 	printf("mount: %d\n", lilotafs_mount(&ctx, TOTAL_SIZE, disk));
 
+	// DIR *dir = lilotafs_opendir(&ctx, "sys/");
+	DIR *dir = lilotafs_opendir(&ctx, "//./");
+
+	while (1) {
+		struct dirent *de = lilotafs_readdir(&ctx, dir);
+		if (de == NULL)
+			break;
+		printf("%s\n", de->d_name);
+	}
+
+	lilotafs_closedir(&ctx, dir);
+
+	lilotafs_unmount(&ctx);
+
+	return 0;
+
 	char input[101];
 	char *token;
 

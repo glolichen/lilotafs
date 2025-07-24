@@ -1,4 +1,5 @@
 #include "lilotaFS.h"
+#include <dirent.h>
 #include <stdint.h>
 #include <fcntl.h>
 
@@ -1201,13 +1202,39 @@ int lilotafs_errno(void *ctx) {
 	return context->errno;
 }
 
+char *remove_prefix_slash(const char *filename) {
+	uint32_t filename_len = strlen(filename);
+	char *actual_name = (char *) filename;
+
+	// continuously remove '/' prefix (lilota likes to ask for "//file")
+	while (actual_name[0] == '/') {
+		char *previous_name = actual_name;
+		actual_name = (char *) malloc(filename_len * sizeof(char));
+
+		for (uint32_t i = 0; i < filename_len - 1; i++)
+			actual_name[i] = previous_name[i + 1];
+		actual_name[filename_len - 1] = 0;
+
+		if (previous_name != filename)
+			free(previous_name);
+	}
+
+	return actual_name;
+}
+
 int lilotafs_open(void *ctx, const char *name, int flags, int mode) {
-	(void) (mode);
+	(void) mode;
 	
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
 	uint32_t filename_len_raw = strlen(name);
 	if (filename_len_raw > LILOTAFS_MAX_FILENAME_LEN) {
+		context->errno = LILOTAFS_EINVAL;
+		return -1;
+	}
+
+	// cannot end with slash (end with slash are directories)
+	if (name[filename_len_raw - 1] == '/') {
 		context->errno = LILOTAFS_EINVAL;
 		return -1;
 	}
@@ -1228,31 +1255,7 @@ int lilotafs_open(void *ctx, const char *name, int flags, int mode) {
 		}
 	}
 	
-	char *actual_name = (char *) name;
-	// continuously remove '/' prefix (lilota likes to ask for "//file")
-	while (actual_name[0] == '/') {
-		char *previous_name = actual_name;
-		actual_name = (char *) malloc(filename_len_raw * sizeof(char));
-
-		for (uint32_t i = 0; i < filename_len_raw - 1; i++)
-			actual_name[i] = previous_name[i + 1];
-		actual_name[filename_len_raw - 1] = 0;
-
-		if (previous_name != name)
-			free(previous_name);
-	}
-
-	// for (int i = 0; i < context->fd_list_size; i++) {
-	// 	struct lilotafs_file_descriptor *descriptor = &context->fd_list[i];
-	// 	if (!descriptor->in_use)
-	// 		continue;
-	// 	struct lilotafs_rec_header *header = (struct lilotafs_rec_header *) context->flash_mmap + descriptor->position;
-	// 	char *desc_filename = (char *) header + sizeof(struct lilotafs_rec_header);
-	// 	if (strncmp(desc_filename, actual_name, strlen(actual_name)) == 0) {
-	// 		free(actual_name);
-	// 		return i;
-	// 	}
-	// }
+	char *actual_name = remove_prefix_slash(name);
 
 	// if we open an existing file for write,
 	// previous_position stores the location of the migrating file
@@ -1562,21 +1565,203 @@ int lilotafs_delete(void *ctx, int fd) {
 	return LILOTAFS_SUCCESS;
 }
 
-// struct lilotafs_dir {
-// 	DIR dir;
-// 	const char *name;
-// 	int offset;
-// };
+struct dirent lilotafs_de;
+
+struct lilotafs_dir {
+#ifndef LILOTAFS_LOCAL
+	DIR dir;
+#endif
+	char *name;
+	struct lilotafs_rec_header *cur_file;
+};
+
+char *add_slash(const char *name) {
+	int name_len = strlen(name);
+	char *name_slash = (char *) name;
+	if (name[name_len - 1] != '/') {
+		name_slash = (char *) malloc(name_len + 2);
+		for (int i = 0; i < name_len; i++)
+			name_slash[i] = name[i];
+		name_slash[name_len] = '/';
+		name_slash[name_len + 1] = 0;
+	}
+	return name_slash;
+}
+
+int lilotafs_mkdir(void *ctx, const char *name, mode_t mode) {
+	(void) mode;
+
+	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
+
+	for (int i = 0; i < context->fd_list_size; i++) {
+		struct lilotafs_file_descriptor *descriptor = &context->fd_list[i];
+		if (!descriptor->in_use)
+			continue;
+		if (descriptor->flags & O_WRONLY) {
+			context->errno = LILOTAFS_EPERM;
+			return -1;
+		}
+	}
+
+	char *name_slash = add_slash(name);
+
+	uint32_t offset = UINT32_MAX;
+	int code = append_file(ctx, name_slash, &offset, NULL, 0, LILOTAFS_STATUS_COMMITTED, false);
+	if (code != LILOTAFS_SUCCESS) {
+		context->errno = code;
+		if (name_slash != name)
+			free(name_slash);
+		return -1;
+	}
+	
+	if (name_slash != name)
+		free(name_slash);
+
+	return 0;
+}
 
 DIR *lilotafs_opendir(void *ctx, const char *name) {
-	// struct lilotafs_dir dir;
-	// memset(&dir, 0, sizeof(struct lilotafs_dir));
-	return (DIR *) name;
+	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
+
+	char *actual_name;
+	if (strlen(name) == 0)
+		actual_name = (char *) name;
+	else {
+		char *name_no_prefix = remove_prefix_slash(name);
+		actual_name = add_slash(name_no_prefix);
+		if (name_no_prefix != actual_name && name_no_prefix != name)
+			free(name_no_prefix);
+
+		if (strcmp(actual_name, "./") == 0) {
+			if (actual_name != name)
+				free(actual_name);
+			actual_name = (char *) malloc(1);
+			actual_name[0] = 0;
+		}
+	}
+
+	struct lilotafs_dir *dir = (struct lilotafs_dir *) calloc(1, sizeof(struct lilotafs_dir));
+	if (dir == NULL) {
+		if (actual_name != name)
+			free(actual_name);
+		return NULL;
+	}
+
+	if (actual_name == name) {
+		int name_len = strlen(name);
+		dir->name = (char *) malloc(name_len + 1);
+		for (int i = 0; i < name_len; i++)
+			dir->name[i] = name[i];
+		dir->name[name_len] = 0;
+	}
+	else
+		dir->name = actual_name;
+
+	dir->cur_file = (struct lilotafs_rec_header *) (context->flash_mmap + context->fs_head);
+	return (DIR *) dir;
 }
+
+// https://stackoverflow.com/a/4770992
+bool startswith(const char *str, const char *prefix) {
+    return strncmp(prefix, str, strlen(prefix)) == 0;
+}
+
+// check if a file is "directly under" a directory and should be returned by readdir
+bool is_dir_child(const char *dir, const char *file) {
+	int filename_len = strlen(file);
+
+	// if dir is "" (length 0) then we are listing the root:
+	//  - files do not have slash anywhere
+	//  - directories only have one slash
+	if (strlen(dir) == 0) {
+		// do not care about the last character
+		for (int i = 0; i < filename_len - 1; i++) {
+			if (file[i] == '/')
+				return false;
+		}
+		return true;
+	}
+
+	// check that everything up to the last slash (including the slash)
+	// is equal to the directory
+	int last_slash = -1;
+	for (int i = filename_len - 1; i >= 0; i--) {
+		if (file[i] == '/') {
+			last_slash = i;
+			break;
+		}
+	}
+
+	if (last_slash == -1)
+		return false;
+
+	// plus one for / character, plus one for null terminator
+	char *file_dir = (char *) malloc(last_slash + 2);
+	strncpy(file_dir, file, last_slash + 1);
+	file_dir[last_slash + 1] = 0;
+
+	int cmp = strcmp(dir, file_dir);
+
+	free(file_dir);
+
+	return cmp == 0;
+}
+
 struct dirent *lilotafs_readdir(void *ctx, DIR *pdir) {
-	return NULL;
+	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
+	struct lilotafs_dir *dir = (struct lilotafs_dir *) pdir;
+
+	// printf("READDIR directory name %.63s\n", dir->name);
+
+	char *full_path;
+	struct lilotafs_rec_header *cur_header = dir->cur_file;
+	while (1) {
+		full_path = (char *) cur_header + sizeof(struct lilotafs_rec_header);
+		if (is_dir_child(dir->name, full_path) && cur_header != dir->cur_file && strcmp(full_path, dir->name) != 0) {
+			// printf("OK %s\n", filename);
+			break;
+		}
+
+		struct lilotafs_rec_header *next_header = process_advance_header(context, cur_header, get_partition_size(ctx));
+		if (!next_header) {
+			return NULL;
+			break;
+		}
+
+		cur_header = next_header;
+		if (cur_header->magic != LILOTAFS_RECORD && cur_header->magic != LILOTAFS_START &&
+				cur_header->magic != LILOTAFS_START_CLEAN && cur_header->magic != LILOTAFS_WRAP_MARKER) {
+
+			return NULL;
+			break;
+		}
+	}
+
+	int full_path_len = strlen(full_path);
+
+	lilotafs_de.d_ino = (POINTER_SIZE) cur_header - (POINTER_SIZE) context->flash_mmap;
+	lilotafs_de.d_type = full_path[full_path_len - 1] == '/' ? DT_DIR : DT_REG;
+
+	// clear the filename to all 0
+	memset(&lilotafs_de.d_name, 0, sizeof(lilotafs_de.d_name));
+
+	// the file we return must have the directory stripped
+	int path_len = strlen(dir->name);
+	int filename_len = full_path_len - path_len;
+	for (int i = 0; i < filename_len; i++)
+		lilotafs_de.d_name[i] = full_path[i + path_len];
+	lilotafs_de.d_name[full_path_len] = 0;
+
+	dir->cur_file = cur_header;
+
+	return &lilotafs_de;
 }
+
 int lilotafs_closedir(void *ctx, DIR *pdir) {
+	(void) ctx;
+
+	free(((struct lilotafs_dir *) pdir)->name);
+	free(pdir);
 	return 0;
 }
 
