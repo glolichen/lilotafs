@@ -28,5 +28,5 @@ new_disk:
 
 clean:
 	# rm test gen_test_disk torture *.o
-	rm test torture *.o
+	rm -f test torture *.o
 

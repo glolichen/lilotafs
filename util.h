@@ -3,11 +3,11 @@
 
 #include <stdint.h>
 
-#define PRINT_STUFF
+// #define PRINT_STUFF
 // #define PRINT_FREE
 
 #define FILE_COUNT 60
-#define OP_COUNT 4000
+#define OP_COUNT 9000
 
 #define MIN_SIZE 5
 #define MAX_SIZE 9000
@@ -15,9 +15,9 @@
 // #define MIN_SIZE 0
 // #define MAX_SIZE 0
 
-#define OPS_PER_REMOUNT 250
+#define OPS_PER_REMOUNT 25
 
-#define CRASH_INJECT
+// #define CRASH_INJECT
 
 #define CRASH_WRITE_MIN_MOVES 100
 #define CRASH_WRITE_MAX_MOVES 100000

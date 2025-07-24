@@ -40,19 +40,17 @@ int lilotafs_flash_write(struct lilotafs_context *ctx, const void *buffer, uint3
 		}
 	}
 
-#ifdef CRASH_INJECT
 	for (uint32_t i = 0; i < length; i++) {
+#ifdef CRASH_INJECT
 		if (write_moves_remaining != 0 && write_moves_remaining-- == 1) {
 			PRINTF("WRITE CRASH\n");
 			PRINTF("call: write len %u to address 0x%x\n", length, address);
 			PRINTF("crash before writing 0x%x to 0x%x\n", write[i], address + i);
 			longjmp(lfs_mount_jmp_buf, 1);
 		}
+#endif
 		*(ctx->flash_mmap + address + i) = write[i];
 	}
-#else
-	memcpy(mmap + address, buffer, length);
-#endif
 
 	return FLASH_OK;
 }
@@ -65,15 +63,13 @@ int lilotafs_flash_erase_region(struct lilotafs_context *ctx, uint32_t start, ui
 	if (start > total_size || start + len > total_size)
 		return FLASH_OUT_OF_BOUNDS;
 
-#ifdef CRASH_INJECT
 	for (uint32_t i = 0; i < len; i++) {
+#ifdef CRASH_INJECT
 		if (erase_moves_remaining != 0 && erase_moves_remaining-- == 1)
 			longjmp(lfs_mount_jmp_buf, 1);
+#endif
 		*(ctx->flash_mmap + start + i) = 0xFF;
 	}
-#else
-	memset(mmap + start, 0xFF, len);
-#endif
 
 	return FLASH_OK;
 }
