@@ -161,7 +161,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 		int code;
 		PRINTF("main loop: step %u\n", op);
 
-		if (op == 8673)
+		if (op == 1800)
 			printf("\n");
 
 		if (setjmp(lfs_mount_jmp_buf) == 0)

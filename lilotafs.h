@@ -88,6 +88,7 @@ struct lilotafs_file_descriptor {
 	bool in_use;
 	uint32_t position;
 	uint32_t previous_position;
+	uint32_t filename_len;
 	off_t offset;
 	int flags;
 };
