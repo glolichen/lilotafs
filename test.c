@@ -11,7 +11,7 @@
 #include <string.h>
 
 #include "util.h"
-#include "lilotaFS.h"
+#include "lilotafs.h"
 
 // NOTE: testing utility commands:
 // W [fd] [length]        | write random data of length [length] to file [fd]
@@ -64,10 +64,10 @@ int main(int argc, char *argv[]) {
 	// }
 	//
 	// lilotafs_closedir(&ctx, dir);
-
-	lilotafs_unmount(&ctx);
-
-	return 0;
+	//
+	// lilotafs_unmount(&ctx);
+	//
+	// return 0;
 
 	char input[101];
 	char *token;

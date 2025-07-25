@@ -13,7 +13,7 @@
 #include <stdio.h>
 #include <sys/stat.h>
 
-#include "lilotaFS.h"
+#include "lilotafs.h"
 
 char *remove_prefix(const char *filename, int prefix_length) {
 	int abs_strlen = strlen(filename);

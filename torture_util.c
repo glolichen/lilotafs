@@ -11,7 +11,7 @@
 
 #include "util.h"
 #include "flash.h"
-#include "lilotaFS.h"
+#include "lilotafs.h"
 
 extern jmp_buf lfs_mount_jmp_buf;
 
@@ -32,6 +32,7 @@ uint32_t inspect_fs(struct lilotafs_context *ctx, struct table_entry *files) {
 		if (fd == -1) {
 			PRINTF("inspect: file %s: can't open\n", filename);
 			total_wrong++;
+			lilotafs_close(ctx, fd);
 			continue;
 		}
 
@@ -42,6 +43,7 @@ uint32_t inspect_fs(struct lilotafs_context *ctx, struct table_entry *files) {
 		if (!file_content) {
 			PRINTF("inspect: file %s: malloc fail\n", filename);
 			total_wrong++;
+			lilotafs_close(ctx, fd);
 			continue;
 		}
 
@@ -50,35 +52,33 @@ uint32_t inspect_fs(struct lilotafs_context *ctx, struct table_entry *files) {
 			PRINTF("inspect: file %s: read fail\n", filename);
 			total_wrong++;
 			free(file_content);
+			lilotafs_close(ctx, fd);
 			continue;
 		}
 
 
 		if (alternate_content_file == i) {
+			bool correct = false;
 			if (actual_size == files[i].content_size) {
 				if (actual_size != 0) {
 					uint32_t cmp = memcmp(file_content, files[i].content, actual_size);
-					if (cmp != 0) {
-						PRINTF("inspect: file %s: content wrong\n", filename);
-						total_wrong++;
-					}
+					if (cmp == 0)
+						correct = true;
 				}
 			}
-			else if (actual_size == alternate_content_size) {
+			if (actual_size == alternate_content_size) {
 				if (actual_size != 0) {
 					uint32_t cmp = memcmp(file_content, alternate_content, actual_size);
-					if (cmp != 0) {
-						PRINTF("inspect: file %s: content wrong\n", filename);
-						total_wrong++;
-						free(file_content);
-						continue;
+					if (cmp == 0) {
+						correct = true;
+						files[i].content_size = actual_size;
+						files[i].content = (uint8_t *) realloc(files[i].content, actual_size);
+						memcpy(files[i].content, alternate_content, actual_size);
 					}
-					files[i].content_size = actual_size;
-					files[i].content = (uint8_t *) realloc(files[i].content, actual_size);
-					memcpy(files[i].content, alternate_content, actual_size);
 				}
 			}
-			else {
+
+			if (!correct) {
 				PRINTF("inspect: file %s: size wrong: got %u, expected %u or %u\n",
 						filename, actual_size, files[i].content_size, alternate_content_size);
 				total_wrong++;
@@ -89,6 +89,7 @@ uint32_t inspect_fs(struct lilotafs_context *ctx, struct table_entry *files) {
 				PRINTF("inspect: file %s: size wrong: got %u, expected %u\n", filename, actual_size, files[i].content_size);
 				total_wrong++;
 				free(file_content);
+				lilotafs_close(ctx, fd);
 				continue;
 			}
 			if (actual_size != 0) {
@@ -100,6 +101,7 @@ uint32_t inspect_fs(struct lilotafs_context *ctx, struct table_entry *files) {
 			}
 		}
 
+		lilotafs_close(ctx, fd);
 		free(file_content);
 	}
 
@@ -110,7 +112,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 	int disk = open(disk_name, O_RDWR);
 	uint64_t seed = random_seed == 0 ? time(NULL) : random_seed;
 
-	PRINTF("random seed: %ld\n", seed);
+	fprintf(stderr, "random seed: %ld\n", seed);
 	srand(seed);
 
 	struct lilotafs_context ctx;
@@ -142,9 +144,6 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 	for (uint32_t op = 0; op < OP_COUNT; op++) {
 		uint32_t file = RANDOM_NUMBER(0, FILE_COUNT - 1);
 		
-		int fd = lilotafs_open(&ctx, files[file].filename, O_WRONLY | O_CREAT, 0);
-		files[file].opened = true;
-
 		int random_size = RANDOM_NUMBER(MIN_SIZE, MAX_SIZE);
 		uint8_t *random = (uint8_t *) malloc(random_size);
 		if (!random) {
@@ -153,13 +152,16 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 			goto cleanup;
 		}
 
+		int fd = lilotafs_open(&ctx, files[file].filename, O_WRONLY | O_CREAT, 0);
+		files[file].opened = true;
+
 		for (int i = 0; i < random_size; i++)
 			random[i] = RANDOM_NUMBER(0, 255);
 
 		int code;
 		PRINTF("main loop: step %u\n", op);
 
-		if (op == 639)
+		if (op == 8673)
 			printf("\n");
 
 		if (setjmp(lfs_mount_jmp_buf) == 0)
@@ -169,6 +171,8 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 			// simulate computer restart by unmounting and remounting
 			PRINTF("\n\n=============== SIMULATED CRASH ===============\n");
 			PRINTF("crash inject: random = %p\n", random);
+
+			// return 1;
 
 			flash_set_crash(CRASH_WRITE_MIN_MOVES, CRASH_WRITE_MAX_MOVES, CRASH_ERASE_MIN_MOVES, CRASH_ERASE_MAX_MOVES);
 
@@ -180,6 +184,8 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 			alternate_content = random;
 
 			uint32_t wrong = inspect_fs(&ctx, files);
+			if (wrong != 0)
+				printf("BAD\n");
 			total_wrong += wrong;
 			PRINTF("post crash inspect: %u\n", wrong);
 

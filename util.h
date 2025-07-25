@@ -6,21 +6,21 @@
 #define PRINT_STUFF
 // #define PRINT_FREE
 
-#define FILE_COUNT 60
+#define FILE_COUNT 1
 #define OP_COUNT 9000
 
 #define MIN_SIZE 5
-#define MAX_SIZE 9000
+#define MAX_SIZE 200
 
 // #define MIN_SIZE 0
 // #define MAX_SIZE 0
 
 #define OPS_PER_REMOUNT 25
 
-// #define CRASH_INJECT
+#define CRASH_INJECT
 
-#define CRASH_WRITE_MIN_MOVES 100
-#define CRASH_WRITE_MAX_MOVES 100000
+#define CRASH_WRITE_MIN_MOVES 50
+#define CRASH_WRITE_MAX_MOVES 10000
 // #define CRASH_WRITE_MIN_MOVES UINT32_MAX
 // #define CRASH_WRITE_MAX_MOVES UINT32_MAX
 

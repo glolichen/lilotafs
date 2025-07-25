@@ -16,12 +16,36 @@
       "-O0",
       "-fsanitize=address,undefined",
       "-o",
-      "lilotaFS.o",
-      "lilotaFS.c"
+      "lilotafs.o",
+      "lilotafs.c"
     ],
-    "directory": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotaFS",
-    "file": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotaFS/lilotaFS.c",
-    "output": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotaFS/lilotaFS.o"
+    "directory": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotafs",
+    "file": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotafs/lilotafs.c",
+    "output": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotafs/lilotafs.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/clang",
+      "-c",
+      "-I.",
+      "-D",
+      "TOTAL_SIZE=2097152",
+      "-D",
+      "SECTOR_SIZE=4096",
+      "-D",
+      "LILOTAFS_LOCAL",
+      "-Wall",
+      "-Wextra",
+      "-g",
+      "-O0",
+      "-fsanitize=address,undefined",
+      "-o",
+      "flash.o",
+      "flash.c"
+    ],
+    "directory": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotafs",
+    "file": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotafs/flash.c",
+    "output": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotafs/flash.o"
   },
   {
     "arguments": [
@@ -43,8 +67,56 @@
       "torture_util.o",
       "torture_util.c"
     ],
-    "directory": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotaFS",
-    "file": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotaFS/torture_util.c",
-    "output": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotaFS/torture_util.o"
+    "directory": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotafs",
+    "file": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotafs/torture_util.c",
+    "output": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotafs/torture_util.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/clang",
+      "-c",
+      "-I.",
+      "-D",
+      "TOTAL_SIZE=2097152",
+      "-D",
+      "SECTOR_SIZE=4096",
+      "-D",
+      "LILOTAFS_LOCAL",
+      "-Wall",
+      "-Wextra",
+      "-g",
+      "-O0",
+      "-fsanitize=address,undefined",
+      "-o",
+      "test.o",
+      "test.c"
+    ],
+    "directory": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotafs",
+    "file": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotafs/test.c",
+    "output": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotafs/test.o"
+  },
+  {
+    "arguments": [
+      "/usr/bin/clang",
+      "-c",
+      "-I.",
+      "-D",
+      "TOTAL_SIZE=2097152",
+      "-D",
+      "SECTOR_SIZE=4096",
+      "-D",
+      "LILOTAFS_LOCAL",
+      "-Wall",
+      "-Wextra",
+      "-g",
+      "-O0",
+      "-fsanitize=address,undefined",
+      "-o",
+      "torture.o",
+      "torture.c"
+    ],
+    "directory": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotafs",
+    "file": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotafs/torture.c",
+    "output": "/home/jayden/lilota/platforms/esp-idf/components/esp-common/lilotafs/torture.o"
   }
 ]

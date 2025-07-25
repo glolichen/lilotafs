@@ -10,7 +10,7 @@ CFLAGS=-I. -D TOTAL_SIZE=$(TOTAL_SIZE) -D SECTOR_SIZE=$(SECTOR_SIZE) -D LILOTAFS
 		-Wall -Wextra -g -O3 \
 		-fsanitize=address,undefined -static-libasan
 
-OBJ = lilotaFS.o flash.o torture_util.o
+OBJ = lilotafs.o flash.o torture_util.o
 
 all: clean test torture
 

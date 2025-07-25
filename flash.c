@@ -8,7 +8,7 @@
 
 #include "util.h"
 #include "flash.h"
-#include "lilotaFS.h"
+#include "lilotafs.h"
 
 jmp_buf lfs_mount_jmp_buf;
 
@@ -36,6 +36,7 @@ int lilotafs_flash_write(struct lilotafs_context *ctx, const void *buffer, uint3
 		uint8_t byte = write[i] | current;
 		if (byte ^ current) {
 			PRINTF("FLASH WRITE FAILED: address 0x%x\n", address);
+			exit(4);
 			return 1;
 		}
 	}
@@ -57,11 +58,15 @@ int lilotafs_flash_write(struct lilotafs_context *ctx, const void *buffer, uint3
 
 int lilotafs_flash_erase_region(struct lilotafs_context *ctx, uint32_t start, uint32_t len) {
 	uint32_t total_size = ctx->partition_size;
-	uint32_t sector_size = ctx->flash_sector_size;
-	if (start % sector_size != 0 || len % sector_size != 0)
+	uint32_t sector_size = ctx->block_size;
+	if (start % sector_size != 0 || len % sector_size != 0) {
+		printf("flash erase out of bounds\n");
 		return FLASH_OUT_OF_BOUNDS;
-	if (start > total_size || start + len > total_size)
+	}
+	if (start > total_size || start + len > total_size) {
+		printf("flash erase out of bounds\n");
 		return FLASH_OUT_OF_BOUNDS;
+	}
 
 	for (uint32_t i = 0; i < len; i++) {
 #ifdef CRASH_INJECT
@@ -77,7 +82,7 @@ int lilotafs_flash_erase_region(struct lilotafs_context *ctx, uint32_t start, ui
 #else
 
 #include <stdint.h>
-#include "lilotaFS.h"
+#include "lilotafs.h"
 
 int lilotafs_flash_write(struct lilotafs_context *ctx, const void *buffer, uint32_t address, uint32_t length) {
 	if (address + length > ctx->partition->size)
@@ -103,7 +108,7 @@ int lilotafs_flash_write(struct lilotafs_context *ctx, const void *buffer, uint3
 
 int lilotafs_flash_erase_region(struct lilotafs_context *ctx, uint32_t start, uint32_t len) {
 	uint32_t total_size = ctx->partition->size;
-	uint32_t sector_size = ctx->flash_sector_size;
+	uint32_t sector_size = ctx->flash_size;
 	if (start % sector_size != 0 || len % sector_size != 0)
 		return 1;
 	if (start > total_size || start + len > total_size)

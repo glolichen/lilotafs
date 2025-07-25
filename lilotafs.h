@@ -68,7 +68,7 @@ struct lilotafs_context {
 	esp_partition_mmap_handle_t map_handle;
 #endif
 
-	uint32_t flash_sector_size;
+	uint32_t block_size;
 	uint8_t *flash_mmap;
 	uint32_t fs_head, fs_tail;
 	uint32_t largest_file_size, largest_filename_len;

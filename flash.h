@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdint.h>
 
-#include "lilotaFS.h"
+#include "lilotafs.h"
 
 #define FLASH_OK 0
 #define FLASH_FILE_IO_ERROR 101
