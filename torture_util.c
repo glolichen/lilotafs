@@ -1,3 +1,4 @@
+#include <unistd.h>
 #ifdef LILOTAFS_LOCAL
 #include "torture_util.h"
 
@@ -112,7 +113,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 	int disk = open(disk_name, O_RDWR);
 	uint64_t seed = random_seed == 0 ? time(NULL) : random_seed;
 
-	fprintf(stderr, "random seed: %ld\n", seed);
+	fprintf(stdout, "random seed: %ld\n", seed);
 	srand(seed);
 
 	struct lilotafs_context ctx;
@@ -153,7 +154,6 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 		}
 
 		int fd = lilotafs_open(&ctx, files[file].filename, O_WRONLY | O_CREAT, 0);
-		files[file].opened = true;
 
 		for (int i = 0; i < random_size; i++)
 			random[i] = RANDOM_NUMBER(0, 255);
@@ -203,7 +203,15 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 
 		int error = code == random_size ? LILOTAFS_SUCCESS : lilotafs_errno(&ctx);
 
-		lilotafs_close(&ctx, fd);
+		int close_error = lilotafs_close(&ctx, fd);
+		if (close_error) {
+			PRINTF("main loop: file %s: close error %u\n", files[file].filename, close_error);
+			error_code = close_error;
+			free(random);
+			goto cleanup;
+		}
+		files[file].opened = true;
+
 		if (error == LILOTAFS_SUCCESS) {
 			files[file].content_size = random_size;
 			files[file].content = (uint8_t *) realloc(files[file].content, random_size);

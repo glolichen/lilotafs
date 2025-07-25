@@ -2,7 +2,7 @@ import os
 import sys
 import random
 
-PRINT_EVERY = 10
+PRINT_EVERY = 1
 REPEATS = 100000
 
 def main():

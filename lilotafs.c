@@ -927,18 +927,18 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 	// need to fix crash recovery
 
 	if (scan_result.reserved) {
-		PRINTF("crash recovery: migrating and reserved\n");
+		PRINTF("crash recovery: reserved\n");
 
-		// (a) the most common case, where we crash while writing data
-		// and the file name is completely written and data_len is FFFFFFFF
-		// (data_len is set immediately before it is committed)
+		// (a) crash while writing data, or crash while writing data_len
 		//
 		//  1. locate the flash sector immediately above data start of the reserved file
 		//  2. erase sectors until we reach the end of flash, or we are at the head
 		//  3. within the same sector as the data start, find the last byte that is not FF
-		//  4. claim that byte as the end, and set the data_len appropriately
-		//  5. delete reserved file
-		//  6. (if there is migrating) copy the migrating file to the end
+		//  4. claim that byte as the end, and calculate the file size
+		//  5. if data_len is not FFFFFFFF (crash while writing data_len),
+		//     increment file size until we can write it into data_len
+		//  6. write data_len and delete reserved file reserved file
+		//  7. (if there is migrating) copy the migrating file to the end
 		//
 		// (b) crash while writing the file name -- file name is not terminated
 		//
@@ -953,15 +953,6 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 		//   3. set the firstr byte to 0 (empty file name)
 		//   4. set data_len such that next file is after the "junk file name"
 		//   5. delete that file
-		//
-		// (c) crash while setting data len -- data_len is not FFFFFFFF
-		// but file is also not committed (data_len not completely written)
-		//
-		//  1. go to either fs_head or end of disk
-		//  2. find the first byte that is not FF, consider that the end of file
-		//  3. calculate the "minimum possible file size" based on the first non-FF byte
-		//  4. keep incrementing that file size, until it can be written into data_len
-		//  5. delete the file
 
 		struct lilotafs_rec_header *migrating = scan_result.migrating;
 		struct lilotafs_rec_header *reserved = scan_result.reserved;
