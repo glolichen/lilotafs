@@ -150,8 +150,8 @@ int main(int argc, char *argv[]) {
 			printf("close fd %d: %d\n", fd, result);
 		}
 		else if (mode == 'd') {
-			int result = lilotafs_delete(&ctx, fd);
-			printf("delete fd %d: %d\n", fd, result);
+			// int result = lilotafs_delete(&ctx, fd);
+			// printf("delete fd %d: %d\n", fd, result);
 
 		}
 		else if (mode == 'w' || mode == 'W') {

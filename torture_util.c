@@ -162,7 +162,6 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 		int fd = lilotafs_open(&ctx, files[file].filename, O_WRONLY | O_CREAT, 0);
 		if (fd == -1) {
 			if (lilotafs_errno(&ctx) == LILOTAFS_ENOSPC) {
-				printf("no space step %u\n", op);
 				PRINTF("\n\n=============== UNMOUNT/REMOUNT ===============\n");
 
 				int remount_code = lilotafs_unmount(&ctx);
@@ -200,7 +199,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 		int code;
 		PRINTF("main loop: step %u\n", op);
 
-		if (op == 1125)
+		if (op == 301)
 			printf("\n");
 
 		if (setjmp(lfs_mount_jmp_buf) == 0)

@@ -73,7 +73,7 @@ struct lilotafs_context {
 	uint32_t fs_head, fs_tail;
 	uint32_t largest_file_size, largest_filename_len;
 	bool has_wear_marker;
-	int errno;
+	int f_errno;
 	int fd_list_size, fd_list_capacity;
 	struct lilotafs_file_descriptor *fd_list;
 };
@@ -91,6 +91,7 @@ struct lilotafs_file_descriptor {
 	uint32_t filename_len;
 	off_t offset;
 	int flags;
+	int write_errno;
 };
 
 uint32_t lilotafs_unmount(void *ctx);
