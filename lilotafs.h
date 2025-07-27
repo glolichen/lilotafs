@@ -108,7 +108,7 @@ int lilotafs_close(void *ctx, int fd);
 ssize_t lilotafs_write(void *ctx, int fd, const void *buffer, unsigned int len);
 ssize_t lilotafs_read(void *ctx, int fd, void *buffer, size_t len);
 off_t lilotafs_lseek(void *ctx, int fd, off_t offset, int whence);
-int lilotafs_delete(void *ctx, int fd);
+// int lilotafs_delete(void *ctx, int fd);
 
 int lilotafs_mkdir(void *ctx, const char *name, mode_t mode);
 DIR *lilotafs_opendir(void *ctx, const char *name);

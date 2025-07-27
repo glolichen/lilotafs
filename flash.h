@@ -12,7 +12,8 @@
 #define FLASH_OUT_OF_BOUNDS 103
 
 #ifdef LILOTAFS_LOCAL
-void flash_set_crash(uint32_t write_min, uint32_t write_max, uint32_t erase_min, uint32_t erase_max);
+void lilotafs_flash_clear_crash(void);
+void lilotafs_flash_set_crash(uint32_t write_min, uint32_t write_max, uint32_t erase_min, uint32_t erase_max);
 #else
 #endif
 

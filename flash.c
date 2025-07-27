@@ -15,7 +15,12 @@ jmp_buf lfs_mount_jmp_buf;
 uint32_t write_moves_remaining = 0;
 uint32_t erase_moves_remaining = 0;
 
-void flash_set_crash(uint32_t write_min, uint32_t write_max, uint32_t erase_min, uint32_t erase_max) {
+
+void lilotafs_flash_clear_crash(void) {
+	write_moves_remaining = 0;
+	erase_moves_remaining = 0;
+}
+void lilotafs_flash_set_crash(uint32_t write_min, uint32_t write_max, uint32_t erase_min, uint32_t erase_max) {
 	write_moves_remaining = RANDOM_NUMBER(write_min, write_max) + 1;
 	erase_moves_remaining = RANDOM_NUMBER(erase_min, erase_max) + 1;
 }

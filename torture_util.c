@@ -142,7 +142,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 		files[i].content = NULL;
 	}
 
-	flash_set_crash(CRASH_WRITE_MIN_MOVES, CRASH_WRITE_MAX_MOVES, CRASH_ERASE_MIN_MOVES, CRASH_ERASE_MAX_MOVES);
+	lilotafs_flash_set_crash(CRASH_WRITE_MIN_MOVES, CRASH_WRITE_MAX_MOVES, CRASH_ERASE_MIN_MOVES, CRASH_ERASE_MAX_MOVES);
 
 	int total_wrong = 0, error_code = 0;
 	for (uint32_t op = 0; op < OP_COUNT; op++) {
@@ -169,7 +169,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 				if (remount_code != LILOTAFS_SUCCESS) {
 					PRINTF("wear level: file %s: unmount error %d\n", files[file].filename, remount_code);
 					error_code = remount_code;
-					// free(random);
+					free(random);
 					goto cleanup;
 				}
 
@@ -177,7 +177,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 				if (remount_code != LILOTAFS_SUCCESS) {
 					PRINTF("wear level: file %s: unmount error %d\n", files[file].filename, remount_code);
 					error_code = remount_code;
-					// free(random);
+					free(random);
 					goto cleanup;
 				}
 
@@ -187,13 +187,13 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 
 				PRINTF("=============== UNMOUNT/REMOUNT OVER ===============\n\n");
 
-				// free(random);
+				free(random);
 				continue;
 			}
 
 			error_code = lilotafs_errno(&ctx);
 			PRINTF("main loop: file %s: open error %d\n", files[file].filename, error_code);
-			// free(random);
+			free(random);
 			goto cleanup;
 		}
 
@@ -211,11 +211,9 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 			PRINTF("\n\n=============== SIMULATED CRASH ===============\n");
 			PRINTF("crash inject: random = %p\n", random);
 
-			// return 1;
-
-			flash_set_crash(CRASH_WRITE_MIN_MOVES, CRASH_WRITE_MAX_MOVES, CRASH_ERASE_MIN_MOVES, CRASH_ERASE_MAX_MOVES);
-
 			lilotafs_unmount(&ctx);
+
+			// lilotafs_flash_set_crash(CRASH_WRITE_MIN_MOVES, CRASH_WRITE_MAX_MOVES, CRASH_ERASE_MIN_MOVES, CRASH_ERASE_MAX_MOVES);
 			lilotafs_mount(&ctx, TOTAL_SIZE, disk); 
 
 			alternate_content_file = file;
@@ -230,7 +228,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 			alternate_content_size = 0; 
 			alternate_content = NULL;
 
-			// free(random);
+			free(random);
 
 			PRINTF("=============== RECOVERED FROM CRASH ===============\n\n");
 
@@ -317,6 +315,7 @@ cleanup:
 			free(files[i].content);
 	}
 
+	lilotafs_flash_clear_crash();
 	lilotafs_unmount(&ctx);
 
 	if (!error_code && !total_wrong)

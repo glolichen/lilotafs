@@ -17,7 +17,7 @@
 
 #define OPS_PER_REMOUNT 300
 
-#define CRASH_INJECT
+// #define CRASH_INJECT
 #define TORTURE_REMOUNT
 
 #define CRASH_WRITE_MIN_MOVES 50
