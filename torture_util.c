@@ -1,4 +1,3 @@
-#include <asm-generic/errno-base.h>
 #include <unistd.h>
 #ifdef LILOTAFS_LOCAL
 #include "torture_util.h"

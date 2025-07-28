@@ -64,8 +64,10 @@ int lilotafs_flash_write(struct lilotafs_context *ctx, const void *buffer, uint3
 		uint8_t current = ctx->flash_mmap[address + i];
 		uint8_t byte = write[i] | current;
 		if (byte ^ current) {
+#ifdef LILOTAFS_LOCAL
 			fprintf(stderr, "flash write fail: write 0x%x to 0x%x\n", write[i], address + i);
 			exit(1);
+#endif
 			return 1;
 		}
 	}
