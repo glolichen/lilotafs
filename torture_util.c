@@ -31,12 +31,12 @@ uint32_t inspect_fs(struct lilotafs_context *ctx, struct table_entry *files, uin
 			continue;
 
 		char *filename = files[i].filename;
+		PRINTF("inspect: opening file %u: %.63s\n", i, filename);
 
 		int fd = lilotafs_open(ctx, filename, O_RDONLY, 0);
 		if (fd == -1) {
-			PRINTF("inspect: file %s: can't open\n", filename);
+			PRINTF("inspect: file %s: can't open, error %d\n", filename, lilotafs_errno(ctx));
 			total_wrong++;
-			lilotafs_close(ctx, fd);
 			continue;
 		}
 
@@ -159,6 +159,9 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 		for (int i = 0; i < random_size; i++)
 			random[i] = RANDOM_NUMBER(0, 255);
 
+		if (op == 101)
+			printf("\n");
+
 		int fd = lilotafs_open(&ctx, files[file].filename, O_WRONLY | O_CREAT, 0);
 		if (fd == -1) {
 			if (lilotafs_errno(&ctx) == LILOTAFS_ENOSPC) {
@@ -174,7 +177,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 
 				remount_code = lilotafs_mount(&ctx, TOTAL_SIZE, disk); 
 				if (remount_code != LILOTAFS_SUCCESS) {
-					PRINTF("wear level: file %s: unmount error %d\n", files[file].filename, remount_code);
+					PRINTF("wear level: file %s: remount error %d\n", files[file].filename, remount_code);
 					error_code = remount_code;
 					free(random);
 					goto cleanup;
@@ -198,9 +201,6 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 
 		int code;
 		PRINTF("main loop: step %u\n", op);
-
-		if (op == 301)
-			printf("\n");
 
 		if (setjmp(lfs_mount_jmp_buf) == 0)
 			code = lilotafs_write(&ctx, fd, random, random_size);
@@ -235,7 +235,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 			// exit(1);
 		}
 
-		int error = code == random_size ? LILOTAFS_SUCCESS : lilotafs_errno(&ctx);
+		int error = (code == random_size) ? LILOTAFS_SUCCESS : lilotafs_errno(&ctx);
 
 		int close_error = lilotafs_close(&ctx, fd);
 		if (close_error) {
@@ -244,9 +244,9 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 			free(random);
 			goto cleanup;
 		}
-		files[file].opened = true;
 
 		if (error == LILOTAFS_SUCCESS) {
+			files[file].opened = true;
 			files[file].content_size = random_size;
 			files[file].content = (uint8_t *) realloc(files[file].content, random_size);
 			if (random_size != 0)
@@ -268,7 +268,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 
 			remount_code = lilotafs_mount(&ctx, TOTAL_SIZE, disk); 
 			if (remount_code != LILOTAFS_SUCCESS) {
-				PRINTF("wear level: file %s: unmount error %d\n", files[file].filename, remount_code);
+				PRINTF("wear level: file %s: remount error %d\n", files[file].filename, remount_code);
 				error_code = remount_code;
 				free(random);
 				goto cleanup;
