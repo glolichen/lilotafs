@@ -1328,27 +1328,55 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 				mig_data_offset = lilotafs_align_up_32(mig_data_offset, LILOTAFS_DATA_ALIGN);
 				uint8_t *mig_data = (uint8_t *) context->flash_mmap + mig_data_offset;
 
-				if (lilotafs_flash_write(context, mig_data, write_offset, REC_HEADER_DATA_LEN(migrating))) {
-					context->f_errno = LILOTAFS_EFLASH;
-					return LILOTAFS_EFLASH;
+				// check if there's space to write here, without using a wrap marker
+				uint32_t wrap_marker_total = sizeof(struct lilotafs_rec_header);
+				if (write_offset + REC_HEADER_DATA_LEN(migrating) + wrap_marker_total > partition_size) {
+					// no space to write here, close the current file and append
+					if (change_file_data_len(context, reserved, 0)) {
+						context->f_errno = LILOTAFS_EFLASH;
+						return LILOTAFS_EFLASH;
+					}
+					if (change_file_status(context, reserved, LILOTAFS_STATUS_DELETED)) {
+						context->f_errno = LILOTAFS_EFLASH;
+						return LILOTAFS_EFLASH;
+					}
+
+					context->fs_tail = lilotafs_align_up_32(write_offset, LILOTAFS_DATA_ALIGN);
+
+					uint32_t u32_max = UINT32_MAX;
+					int code = append_file(
+						ctx, mig_filename, &u32_max, mig_data, REC_HEADER_DATA_LEN(migrating),
+						LILOTAFS_STATUS_COMMITTED, false, false
+					);
+					if (code != LILOTAFS_STATUS_WEAR_MARKER) {
+						context->f_errno = code;
+						return code;
+					}
+				}
+				else {
+					if (lilotafs_flash_write(context, mig_data, write_offset, REC_HEADER_DATA_LEN(migrating))) {
+						context->f_errno = LILOTAFS_EFLASH;
+						return LILOTAFS_EFLASH;
+					}
+
+					// write data_len, commit and delete migrating
+					if (change_file_data_len(context, reserved, REC_HEADER_DATA_LEN(migrating))) {
+						context->f_errno = LILOTAFS_EFLASH;
+						return LILOTAFS_EFLASH;
+					}
+					if (change_file_status(context, reserved, LILOTAFS_STATUS_COMMITTED)) {
+						context->f_errno = LILOTAFS_EFLASH;
+						return LILOTAFS_EFLASH;
+					}
+					if (change_file_status(context, migrating, LILOTAFS_STATUS_DELETED)) {
+						context->f_errno = LILOTAFS_EFLASH;
+						return LILOTAFS_EFLASH;
+					}
+
+					// write_offset is this file's start of data
+					context->fs_tail = lilotafs_align_up_32(write_offset + REC_HEADER_DATA_LEN(migrating), LILOTAFS_DATA_ALIGN);
 				}
 
-				// write data_len, commit and delete migrating
-				if (change_file_data_len(context, reserved, REC_HEADER_DATA_LEN(migrating))) {
-					context->f_errno = LILOTAFS_EFLASH;
-					return LILOTAFS_EFLASH;
-				}
-				if (change_file_status(context, reserved, LILOTAFS_STATUS_COMMITTED)) {
-					context->f_errno = LILOTAFS_EFLASH;
-					return LILOTAFS_EFLASH;
-				}
-				if (change_file_status(context, migrating, LILOTAFS_STATUS_DELETED)) {
-					context->f_errno = LILOTAFS_EFLASH;
-					return LILOTAFS_EFLASH;
-				}
-
-				// write_offset is this file's start of data
-				context->fs_tail = lilotafs_align_up_32(write_offset + REC_HEADER_DATA_LEN(migrating), LILOTAFS_DATA_ALIGN);
 				scan_result.migrating = NULL;
 				scan_result.reserved = NULL;
 			}

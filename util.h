@@ -9,7 +9,7 @@
 #define FILE_COUNT 20
 #define OP_COUNT 5000
 
-// #define STOP_ON_OP 3516
+#define STOP_ON_OP 3468
 
 #define MIN_SIZE 40
 #define MAX_SIZE 2000
