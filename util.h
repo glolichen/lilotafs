@@ -6,18 +6,20 @@
 // #define PRINT_STUFF
 // #define PRINT_FREE
 
-#define FILE_COUNT 10
-#define OP_COUNT 4000
+#define FILE_COUNT 20
+#define OP_COUNT 5000
+
+// #define STOP_ON_OP 3516
 
 #define MIN_SIZE 40
-#define MAX_SIZE 20000
+#define MAX_SIZE 2000
 
 // #define MIN_SIZE 0
 // #define MAX_SIZE 0
 
 #define OPS_PER_REMOUNT 300
 
-// #define CRASH_INJECT
+#define CRASH_INJECT
 #define TORTURE_REMOUNT
 
 #define CRASH_WRITE_MIN_MOVES 50

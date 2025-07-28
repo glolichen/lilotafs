@@ -158,8 +158,10 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 		for (int i = 0; i < random_size; i++)
 			random[i] = RANDOM_NUMBER(0, 255);
 
-		if (op == 101)
+#ifdef STOP_ON_OP
+		if (op == STOP_ON_OP)
 			printf("\n");
+#endif
 
 		int fd = lilotafs_open(&ctx, files[file].filename, O_WRONLY | O_CREAT, 0);
 		if (fd == -1) {
@@ -212,6 +214,8 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 			lilotafs_unmount(&ctx);
 
 			// lilotafs_flash_set_crash(CRASH_WRITE_MIN_MOVES, CRASH_WRITE_MAX_MOVES, CRASH_ERASE_MIN_MOVES, CRASH_ERASE_MAX_MOVES);
+
+			lilotafs_flash_set_crash(CRASH_WRITE_MIN_MOVES, CRASH_WRITE_MAX_MOVES, CRASH_ERASE_MIN_MOVES, CRASH_ERASE_MAX_MOVES);
 			lilotafs_mount(&ctx, TOTAL_SIZE, disk); 
 
 			alternate_content_file = file;
