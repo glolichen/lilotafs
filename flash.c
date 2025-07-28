@@ -57,12 +57,26 @@ uint32_t lilotafs_flash_flush(struct lilotafs_context *ctx, uint32_t address, ui
 int lilotafs_flash_write(struct lilotafs_context *ctx, const void *buffer, uint32_t address, uint32_t length) {
 	if (address + length > lilotafs_flash_get_partition_size(ctx))
 		return 1;
-	
+
+	uint8_t *write;
+	if (lilotafs_is_ptr_mmaped(ctx, buffer)) {
+		write = (uint8_t *) malloc(length);
+		lilotafs_aligned_memcpy(ctx, write, buffer, length);
+	}
+	else
+		write = (uint8_t *) buffer;
+
 	// check if operation is legal (no changing 0 to 1)
-	uint8_t *write = (uint8_t *) buffer;
 	for (uint32_t i = 0; i < length; i++) {
-		uint8_t current = ctx->flash_mmap[address + i];
-		uint8_t byte = write[i] | current;
+		uint8_t current = lilotafs_mmap_read_byte(&ctx->flash_mmap[address + i]);
+
+		uint8_t cur_write;
+		if (lilotafs_is_ptr_mmaped(ctx, write))
+			cur_write = lilotafs_mmap_read_byte(&write[i]);
+		else
+			cur_write = write[i];
+
+		uint8_t byte = cur_write | current;
 		if (byte ^ current) {
 #ifdef LILOTAFS_LOCAL
 			fprintf(stderr, "flash write fail: write 0x%x to 0x%x\n", write[i], address + i);
@@ -85,13 +99,16 @@ int lilotafs_flash_write(struct lilotafs_context *ctx, const void *buffer, uint3
 		*(ctx->flash_mmap + address + i) = write[i];
 	}
 #else
-	int err = esp_partition_write(ctx->partition, address, buffer, length);
+	int err = esp_partition_write(ctx->partition, address, write, length);
 	if (err != ESP_OK)
 		return 1;
 
 	if (lilotafs_flash_flush(ctx, 0, lilotafs_flash_get_partition_size(ctx)))
 		return LILOTAFS_EFLASH;
 #endif
+
+	if (lilotafs_is_ptr_mmaped(ctx, buffer))
+		free(write);
 
 	return 0;
 }

@@ -24,6 +24,28 @@ static inline uint##bits##_t lilotafs_align_down_##bits(uint##bits##_t num, uint
 static inline uint##bits##_t lilotafs_align_up_##bits(uint##bits##_t num, uint##bits##_t amount) { \
 	return num % amount == 0 ? num : (lilotafs_align_down_##bits(num, amount) + amount); \
 }
+	
+#define ALIGN_DOWN_PTR(bits) \
+static inline void *lilotafs_align_down_ptr(void *ptr, uint##bits##_t amount) { \
+	uint##bits##_t ptr_int = (uint##bits##_t) ptr; \
+	return (void *) ((ptr_int / amount) * amount); \
+}
+#define ALIGN_UP_PTR(bits) \
+static inline void *lilotafs_align_up_ptr(void *ptr, uint##bits##_t amount) { \
+	uint##bits##_t ptr_int = (uint##bits##_t) ptr; \
+	return ptr_int % amount == 0 ? ptr : (void *) ((uint##bits##_t) lilotafs_align_down_ptr(ptr, amount) + amount); \
+}
+
+#if UINTPTR_MAX == 0xFFFFFFFFFFFFFFFF
+	#define POINTER_SIZE uint64_t
+	ALIGN_DOWN_PTR(64)
+	ALIGN_UP_PTR(64)
+#else
+	#define POINTER_SIZE uint32_t
+	ALIGN_DOWN_PTR(32)
+	ALIGN_UP_PTR(32)
+#endif
+
 ALIGN_DOWN_FUNC(32)
 ALIGN_UP_FUNC(32)
 ALIGN_DOWN_FUNC(64)
@@ -81,8 +103,9 @@ struct lilotafs_context {
 struct lilotafs_rec_header {
 	uint16_t magic;
 	uint8_t status;
+	uint8_t __reserved;
 	uint32_t data_len;
-};
+} __attribute__((packed));;
 
 struct lilotafs_file_descriptor {
 	bool in_use;
@@ -93,6 +116,10 @@ struct lilotafs_file_descriptor {
 	int flags;
 	int write_errno;
 };
+
+bool lilotafs_is_ptr_mmaped(struct lilotafs_context *ctx, const void *str);
+uint8_t lilotafs_mmap_read_byte(const void *ptr);
+void *lilotafs_aligned_memcpy(struct lilotafs_context *ctx, void *restrict dest, const void *restrict src, uint32_t n);
 
 uint32_t lilotafs_unmount(void *ctx);
 #ifdef LILOTAFS_LOCAL

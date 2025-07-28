@@ -1,3 +1,4 @@
+#include <dirent.h>
 #ifdef LILOTAFS_LOCAL
 #include "flash.h"
 
@@ -102,7 +103,7 @@ int main(int argc, char *argv[]) {
 					close(disk);
 					return 0;
 				}
-				if (mode != 'o' && mode != 'r' && mode != 'w' && mode != 'd' && mode != 'c' && mode != 'i' && mode != 'W') {
+				if (mode != 'o' && mode != 'l' && mode != 'w' && mode != 'd' && mode != 'c' && mode != 'i' && mode != 'W') {
 					success = false;
 					break;
 				}
@@ -118,7 +119,7 @@ int main(int argc, char *argv[]) {
 			if (i == 2 && mode != 'o' && mode != 'c' && mode != 'i')
 				flag = strtoul(token, NULL, 0);
 
-			if (i >= 2 && mode == 'o') {
+			if ((i >= 2 && mode == 'o') || (i >= 1 && mode == 'l')) {
 				if (strlen(filename) + strlen(token) > 63) {
 					success = false;
 					break;
@@ -175,8 +176,21 @@ int main(int argc, char *argv[]) {
 			printf("head: 0x%x\n", head);
 			printf("tail: 0x%x\n", tail);
 		}
-		else if (mode == 'r') {
-			printf("TODO\n");
+		else if (mode == 'l') {
+			DIR *dir = lilotafs_opendir(&ctx, filename);
+			if (dir == NULL) {
+				printf("open dir failed, %d\n", lilotafs_errno(&ctx));
+				continue;
+			}
+
+			while (true) {
+				struct dirent *de = lilotafs_readdir(&ctx, dir);
+				if (de == NULL)
+					break;
+				printf("%.63s (%s)\n", de->d_name, de->d_type == DT_DIR ? "dir" : "reg");
+			}
+
+			lilotafs_closedir(&ctx, dir);
 		}
 	}
 
