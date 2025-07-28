@@ -126,29 +126,6 @@ void *lilotafs_aligned_memcpy(struct lilotafs_context *ctx, void *restrict dest,
 	return dest;
 }
 
-uint32_t aligned_index_of_char(struct lilotafs_context *ctx, const char *str,
-							   char c, uint32_t exclude_last, uint32_t maxlen) {
-	if (!lilotafs_is_ptr_mmaped(ctx, str)) {
-		for (uint32_t i = 0; i < strnlen(str, maxlen) - exclude_last; i++) {
-			if (str[i] == c)
-				return i;
-		}
-		return -1;
-	}
-
-	uint32_t cur_group = 0;
-	for (uint32_t i = 0; i < aligned_strnlen(ctx, str, maxlen) - exclude_last; i++) {
-		if (i % 4 == 0)
-			cur_group = *((uint32_t *) lilotafs_align_down_ptr((uint8_t *) str + i, 4));
-		uint32_t group_index = i % 4;
-		uint8_t cur = (cur_group >> (group_index * 8)) & 0xFF;
-		if (cur == c)
-			return i;
-	}
-
-	return -1;
-}
-
 uint8_t lilotafs_mmap_read_byte(const void *ptr) {
 	POINTER_SIZE byte_addr = (POINTER_SIZE) ptr;
 	uint32_t *aligned_ptr = (uint32_t *) lilotafs_align_down_ptr((void *) ptr, 4);
@@ -926,7 +903,7 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 	context->block_size = partition->erase_size;
 	
 	const void **flash_mmap_addr = (const void **) &context->flash_mmap;
-	esp_partition_mmap(partition, 0, partition->size, ESP_PARTITION_MMAP_DATA, flash_mmap_addr, &context->map_handle);
+	esp_partition_mmap(partition, 0, partition->size, ESP_PARTITION_MMAP_INST, flash_mmap_addr, &context->map_handle);
 #endif
 
 	context->largest_file_size = 0, context->largest_filename_len = 0;
@@ -1531,14 +1508,16 @@ char *remove_prefix_slash(struct lilotafs_context *ctx, const char *filename) {
 }
 
 char *get_file_directory(struct lilotafs_context *ctx, const char *file) {
-	int filename_len = aligned_strnlen(ctx, file, 64);
-
 	int last_slash = -1;
-	for (int i = filename_len - 1; i >= 0; i--) {
-		if (file[i] == '/') {
+
+	uint32_t cur_group = 0;
+	for (uint32_t i = 0; i < aligned_strnlen(ctx, file, 64) - 1; i++) {
+		if (i % 4 == 0)
+			cur_group = *((uint32_t *) lilotafs_align_down_ptr((uint8_t *) file + i, 4));
+		uint32_t group_index = i % 4;
+		uint8_t cur = (cur_group >> (group_index * 8)) & 0xFF;
+		if (cur == '/')
 			last_slash = i;
-			break;
-		}
 	}
 
 	if (last_slash == -1)
@@ -1546,7 +1525,7 @@ char *get_file_directory(struct lilotafs_context *ctx, const char *file) {
 
 	// plus one for / character, plus one for null terminator
 	char *file_dir = (char *) malloc(last_slash + 2);
-	strncpy(file_dir, file, last_slash + 1);
+	lilotafs_aligned_memcpy(ctx, file_dir, file, last_slash + 1);
 	file_dir[last_slash + 1] = 0;
 
 	return file_dir;
@@ -2137,11 +2116,22 @@ bool is_dir_child(struct lilotafs_context *ctx, const char *dir, const char *fil
 	// if dir is "" (length 0) then we are listing the root:
 	//  - files do not have slash anywhere
 	//  - directories only have one slash, which is the last character
+	// fprintf(stderr, "check is %s child of %s?\n", file, dir);
+
 	if (aligned_strnlen(ctx, dir, 64) == 0) {
 		// exclude the last character, because might be / for directories
 		// if returns -1, that means no / found before the last character
 		// which means the file is under the root directory
-		return aligned_index_of_char(ctx, file, '/', 1, 64) == (uint32_t) -1;
+		uint32_t cur_group = 0;
+		for (uint32_t i = 0; i < aligned_strnlen(ctx, file, 64) - 1; i++) {
+			if (i % 4 == 0)
+				cur_group = *((uint32_t *) lilotafs_align_down_ptr((uint8_t *) file + i, 4));
+			uint32_t group_index = i % 4;
+			uint8_t cur = (cur_group >> (group_index * 8)) & 0xFF;
+			if (cur == '/')
+				return false;
+		}
+		return true;
 	}
 
 	// check that everything up to the last slash (including the slash)
@@ -2150,8 +2140,13 @@ bool is_dir_child(struct lilotafs_context *ctx, const char *dir, const char *fil
 	if (file_dir == NULL)
 		return false;
 
+	// fprintf(stderr, "dir %s\n", file_dir);
+	// fprintf(stderr, "%lu %lu\n", aligned_strnlen(ctx, file_dir, 64), aligned_strnlen(ctx, file, 64));
+
 	int cmp = aligned_strneq(ctx, dir, file_dir, 64);
 	free(file_dir);
+
+	// fprintf(stderr, "good? %u\n", cmp);
 	return cmp == 0;
 }
 
@@ -2164,24 +2159,26 @@ struct dirent *lilotafs_readdir(void *ctx, DIR *pdir) {
 	while (1) {
 		full_path = (char *) cur_header + sizeof(struct lilotafs_rec_header);
 
-		if (cur_header->status == LILOTAFS_STATUS_COMMITTED && is_dir_child(ctx, dir->name, full_path) &&
-				cur_header != dir->cur_file && aligned_strneq(ctx, full_path, dir->name, 64) != 0) {
-
+		if (
+			REC_HEADER_STATUS(cur_header) == LILOTAFS_STATUS_COMMITTED &&
+			aligned_strnlen(ctx, full_path, 64) != 0 &&
+			is_dir_child(ctx, dir->name, full_path) &&
+			cur_header != dir->cur_file &&
+			aligned_strneq(ctx, full_path, dir->name, 64) != 0
+		) {
+			// printf("file %s ok\n", full_path);
 			break;
 		}
 
 		struct lilotafs_rec_header *next_header = process_advance_header(context, cur_header, lilotafs_flash_get_partition_size(ctx));
-		if (!next_header) {
+		if (!next_header)
 			return NULL;
-			break;
-		}
 
 		cur_header = next_header;
 		if (REC_HEADER_MAGIC(cur_header) != LILOTAFS_RECORD && REC_HEADER_MAGIC(cur_header) != LILOTAFS_START &&
 				REC_HEADER_MAGIC(cur_header) != LILOTAFS_START_CLEAN && REC_HEADER_MAGIC(cur_header) != LILOTAFS_WRAP_MARKER) {
 
 			return NULL;
-			break;
 		}
 	}
 
@@ -2196,7 +2193,7 @@ struct dirent *lilotafs_readdir(void *ctx, DIR *pdir) {
 	// the file we return must have the directory stripped
 	int path_len = aligned_strnlen(ctx, dir->name, 64);
 	int filename_len = full_path_len - path_len;
-	lilotafs_aligned_memcpy(ctx, lilotafs_de.d_name, full_path, filename_len + 1);
+	lilotafs_aligned_memcpy(ctx, lilotafs_de.d_name, full_path + path_len, filename_len + 1);
 	dir->cur_file = cur_header;
 
 	return &lilotafs_de;
