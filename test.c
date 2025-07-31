@@ -167,12 +167,10 @@ int main(int argc, char *argv[]) {
 		else if (mode == 'i') {
 			uint32_t count = lilotafs_count_files(&ctx);
 			uint32_t largest_file = lilotafs_get_largest_file_size(&ctx);
-			uint32_t largest_filename_len = lilotafs_get_largest_filename_len(&ctx);
 			uint32_t head = lilotafs_get_head(&ctx);
 			uint32_t tail = lilotafs_get_tail(&ctx);
 			printf("number of files: %u\n", count);
 			printf("largest file: %u\n", largest_file);
-			printf("largest filename len: %u\n", largest_filename_len);
 			printf("head: 0x%x\n", head);
 			printf("tail: 0x%x\n", tail);
 		}

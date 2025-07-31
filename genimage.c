@@ -87,8 +87,8 @@ int main(int argc, char *argv[]) {
 			return 3;
 		}
 		
-		err = lilotafs_write(&ctx, lilotafs_fd, file_data, info.st_size);
-		if (err != info.st_size) {
+		ssize_t written = lilotafs_write(&ctx, lilotafs_fd, file_data, info.st_size);
+		if (written != info.st_size) {
 			fclose(fp);
 			free(rel_filename);
 			free(file_data);

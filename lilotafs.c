@@ -262,11 +262,16 @@ struct lilotafs_rec_header *process_advance_header(void *ctx, struct lilotafs_re
 		return NULL;
 
 	if (REC_HEADER_STATUS(cur_header) == LILOTAFS_STATUS_COMMITTED) {
-		// TODO: save to hash table
-		if (REC_HEADER_DATA_LEN(cur_header) > context->largest_file_size) {
-			context->largest_file_size = REC_HEADER_DATA_LEN(cur_header);
-			context->largest_filename_len =  filename_len_padded - 1;
-		}
+		uint32_t total_file_size = sizeof(struct lilotafs_rec_header) + filename_len_padded;
+		if (aligned_strneq(ctx, filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+			total_file_size = lilotafs_align_up_32(total_file_size, LILOTAFS_DATA_ALIGN_KERNEL);
+		else
+			total_file_size = lilotafs_align_up_32(total_file_size, LILOTAFS_DATA_ALIGN);
+		total_file_size += REC_HEADER_DATA_LEN(cur_header);
+		total_file_size = lilotafs_align_up_32(total_file_size, LILOTAFS_HEADER_ALIGN);
+
+		if (total_file_size > context->largest_file)
+			context->largest_file = total_file_size;
 	}
 
 	return (struct lilotafs_rec_header *) (context->flash_mmap + next_offset);
@@ -412,15 +417,8 @@ int check_free_space(void *ctx, uint32_t current_offset, uint32_t write_offset,
 	uint32_t wear_marker_total = sizeof(struct lilotafs_rec_header) + 1;
 	wrap_marker_total = lilotafs_align_up_32(wrap_marker_total, LILOTAFS_HEADER_ALIGN);
 
-	uint32_t largest_file_total = sizeof(struct lilotafs_rec_header) + context->largest_filename_len + 1;
-	if (current_offset != UINT32_MAX && file_is_kernel(ctx, current_offset))
-		largest_file_total += LILOTAFS_DATA_ALIGN_KERNEL;
-	else
-		largest_file_total = lilotafs_align_up_32(largest_file_total, LILOTAFS_DATA_ALIGN);
-	largest_file_total += context->largest_file_size;
-	largest_file_total = lilotafs_align_up_32(largest_file_total, LILOTAFS_HEADER_ALIGN);
 	// the current file we're writing might be larger than current largest
-	largest_file_total = u32_max(largest_file_total, u32_max(new_file_total, old_file_total));
+	uint32_t largest_file_total = u32_max(context->largest_file, u32_max(new_file_total, old_file_total));
 
 	// hypothetical tail pointer if we added this file
 	// log_wrap indicates whether there is already a wear marker,
@@ -905,7 +903,7 @@ struct lilotafs_rec_header *find_file_name(void *ctx, const char *name, bool acc
 uint32_t lilotafs_unmount(void *ctx) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
-	context->largest_file_size = 0, context->largest_filename_len = 0;
+	context->largest_file = 0;
 	context->fs_head = 0, context->fs_tail = 0;
 	context->has_wear_marker = false;
 
@@ -956,13 +954,13 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 	context->block_size = partition->erase_size;
 	
 	const void **flash_mmap_addr = (const void **) &context->flash_mmap;
-	// esp_partition_mmap(partition, 0, partition->size, ESP_PARTITION_MMAP_INST, flash_mmap_addr, &context->map_handle);
-	spi_flash_mmap(0, 0x300000, ESP_PARTITION_MMAP_INST, flash_mmap_addr, &context->map_handle);
+	esp_partition_mmap(partition, 0, 0x180000, ESP_PARTITION_MMAP_INST, flash_mmap_addr, &context->map_handle);
+	esp_partition_mmap(partition, 0, partition->size, ESP_PARTITION_MMAP_INST, flash_mmap_addr, &context->map_handle);
 	
 	fprintf(stderr, "mmap addr: %p\n", context->flash_mmap);
 #endif
 
-	context->largest_file_size = 0, context->largest_filename_len = 0;
+	context->largest_file = 0;
 	context->fs_head = 0, context->fs_tail = 0;
 	context->has_wear_marker = false;
 	context->f_errno = 0;
@@ -2013,10 +2011,10 @@ ssize_t lilotafs_write(void *ctx, int fd, const void *buffer, unsigned int len) 
 		return -1;
 	}
 
-	if (file_data_len > context->largest_file_size) {
-		context->largest_file_size = file_data_len;
-		context->largest_filename_len = aligned_strnlen(ctx, filename, 64);
-	}
+	// calculate file total size
+	uint32_t file_total_size = data_start + desc->offset + len - desc->position;
+	if (file_total_size > context->largest_file)
+		context->largest_file = file_total_size;
 
 	desc->offset += len;
 	return len;
@@ -2373,11 +2371,7 @@ uint32_t lilotafs_count_files(void *ctx) {
 
 uint32_t lilotafs_get_largest_file_size(void *ctx) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
-	return context->largest_file_size;
-}
-uint32_t lilotafs_get_largest_filename_len(void *ctx) {
-	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
-	return context->largest_filename_len;
+	return context->largest_file;
 }
 uint32_t lilotafs_get_head(void *ctx) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;

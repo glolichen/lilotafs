@@ -96,7 +96,7 @@ struct lilotafs_context {
 	uint32_t block_size;
 	uint8_t *flash_mmap;
 	uint32_t fs_head, fs_tail;
-	uint32_t largest_file_size, largest_filename_len;
+	uint32_t largest_file;
 	bool has_wear_marker;
 	int f_errno;
 	int fd_list_size, fd_list_capacity;
@@ -149,7 +149,6 @@ int lilotafs_closedir(void *ctx, DIR *pdir);
 uint32_t lilotafs_count_files(void *ctx);
 
 uint32_t lilotafs_get_largest_file_size(void *ctx);
-uint32_t lilotafs_get_largest_filename_len(void *ctx);
 uint32_t lilotafs_get_head(void *ctx);
 uint32_t lilotafs_get_tail(void *ctx);
 
