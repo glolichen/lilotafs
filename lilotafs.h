@@ -14,7 +14,10 @@
 
 #define LILOTAFS_HEADER_ALIGN 8
 #define LILOTAFS_DATA_ALIGN 8
+#define LILOTAFS_DATA_ALIGN_KERNEL 0x10000
 #define LILOTAFS_WEAR_LEVEL_MAX_RECORDS 5
+
+#define LILOTAFS_KERNEL_FILENAME "lilota.bin"
 
 #define ALIGN_DOWN_FUNC(bits) \
 static inline uint##bits##_t lilotafs_align_down_##bits(uint##bits##_t num, uint##bits##_t amount) { \

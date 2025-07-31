@@ -6,13 +6,13 @@
 // #define PRINT_STUFF
 // #define PRINT_FREE
 
-#define FILE_COUNT 20
-#define OP_COUNT 5000
+#define FILE_COUNT 60
+#define OP_COUNT 10000
 
 #define STOP_ON_OP 3468
 
 #define MIN_SIZE 40
-#define MAX_SIZE 2000
+#define MAX_SIZE 200
 
 // #define MIN_SIZE 0
 // #define MAX_SIZE 0

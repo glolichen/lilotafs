@@ -62,13 +62,16 @@ int main(int argc, char *argv[]) {
 			err = lilotafs_mkdir(&ctx, rel_filename, 0);
 			if (err != 0) {
 				free(rel_filename);
-				return lilotafs_errno(&ctx);
+				printf("2 ERROR %d\n", lilotafs_errno(&ctx));
+				return 2;
 			}
 
 			printf("    added directory %s %lu\n", rel_filename, strlen(rel_filename));
 			free(rel_filename);
 			continue;
 		}
+
+		printf("    adding file %s, size %ld\n", rel_filename, info.st_size);
 
 		uint8_t *file_data = (uint8_t *) calloc(info.st_size, sizeof(uint8_t));
 
@@ -80,7 +83,8 @@ int main(int argc, char *argv[]) {
 			fclose(fp);
 			free(rel_filename);
 			free(file_data);
-			return lilotafs_errno(&ctx);
+			printf("3 ERROR %d\n", lilotafs_errno(&ctx));
+			return 3;
 		}
 		
 		err = lilotafs_write(&ctx, lilotafs_fd, file_data, info.st_size);
@@ -88,11 +92,10 @@ int main(int argc, char *argv[]) {
 			fclose(fp);
 			free(rel_filename);
 			free(file_data);
-			return lilotafs_errno(&ctx);
+			printf("4 ERROR %d\n", lilotafs_errno(&ctx));
+			return 4;
 		}
 		
-		printf("    added file %s, size %ld\n", rel_filename, info.st_size);
-
 		lilotafs_close(&ctx, lilotafs_fd);
 		fclose(fp);
 		free(rel_filename);
@@ -102,6 +105,8 @@ int main(int argc, char *argv[]) {
 	err = lilotafs_unmount(&ctx);
 	if (err != LILOTAFS_SUCCESS)
 		return err;
+
+	printf("generating image complete!\n");
 
 	return 0;
 }
