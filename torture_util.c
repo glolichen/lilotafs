@@ -54,7 +54,7 @@ uint32_t inspect_fs(struct lilotafs_context *ctx, struct table_entry *files, uin
 		if (read_bytes == -1) {
 			PRINTF("inspect: file %s: read fail\n", filename);
 			total_wrong++;
-			free(file_content);
+			FREE(file_content);
 			lilotafs_close(ctx, fd);
 			continue;
 		}
@@ -91,7 +91,7 @@ uint32_t inspect_fs(struct lilotafs_context *ctx, struct table_entry *files, uin
 			if (actual_size != files[i].content_size) {
 				PRINTF("inspect: file %s: size wrong: got %u, expected %u\n", filename, actual_size, files[i].content_size);
 				total_wrong++;
-				free(file_content);
+				FREE(file_content);
 				lilotafs_close(ctx, fd);
 				continue;
 			}
@@ -105,7 +105,7 @@ uint32_t inspect_fs(struct lilotafs_context *ctx, struct table_entry *files, uin
 		}
 
 		lilotafs_close(ctx, fd);
-		free(file_content);
+		FREE(file_content);
 	}
 
 	return total_wrong;
@@ -146,7 +146,6 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 	int total_wrong = 0, error_code = 0;
 	for (uint32_t op = 0; op < OP_COUNT; op++) {
 		uint32_t file = RANDOM_NUMBER(0, FILE_COUNT - 1);
-		
 		int random_size = RANDOM_NUMBER(MIN_SIZE, MAX_SIZE);
 		uint8_t *random = (uint8_t *) malloc(random_size);
 		if (!random) {
@@ -172,7 +171,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 				if (remount_code != LILOTAFS_SUCCESS) {
 					PRINTF("wear level: file %s: unmount error %d\n", files[file].filename, remount_code);
 					error_code = remount_code;
-					free(random);
+					FREE(random);
 					goto cleanup;
 				}
 
@@ -180,7 +179,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 				if (remount_code != LILOTAFS_SUCCESS) {
 					PRINTF("wear level: file %s: remount error %d\n", files[file].filename, remount_code);
 					error_code = remount_code;
-					free(random);
+					FREE(random);
 					goto cleanup;
 				}
 
@@ -190,13 +189,13 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 
 				PRINTF("=============== UNMOUNT/REMOUNT OVER ===============\n\n");
 
-				free(random);
+				FREE(random);
 				continue;
 			}
 
 			error_code = lilotafs_errno(&ctx);
 			PRINTF("main loop: file %s: open error %d\n", files[file].filename, error_code);
-			free(random);
+			FREE(random);
 			goto cleanup;
 		}
 
@@ -230,7 +229,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 			alternate_content_size = 0; 
 			alternate_content = NULL;
 
-			free(random);
+			FREE(random);
 
 			PRINTF("=============== RECOVERED FROM CRASH ===============\n\n");
 
@@ -244,7 +243,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 		if (close_error) {
 			PRINTF("main loop: file %s: close error %d\n", files[file].filename, close_error);
 			error_code = close_error;
-			free(random);
+			FREE(random);
 			goto cleanup;
 		}
 
@@ -265,7 +264,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 			if (remount_code != LILOTAFS_SUCCESS) {
 				PRINTF("wear level: file %s: unmount error %d\n", files[file].filename, remount_code);
 				error_code = remount_code;
-				free(random);
+				FREE(random);
 				goto cleanup;
 			}
 
@@ -273,7 +272,7 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 			if (remount_code != LILOTAFS_SUCCESS) {
 				PRINTF("wear level: file %s: remount error %d\n", files[file].filename, remount_code);
 				error_code = remount_code;
-				free(random);
+				FREE(random);
 				goto cleanup;
 			}
 
@@ -287,19 +286,20 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 		if (error != LILOTAFS_SUCCESS && error != LILOTAFS_ENOSPC) {
 			PRINTF("main loop: file %s: error %d\n", files[file].filename, error);
 			error_code = error;
-			free(random);
+			FREE(random);
 			goto cleanup;
 		}
 #else
 		if (error != LILOTAFS_SUCCESS) {
 			PRINTF("main loop: file %s: error %d\n", files[file].filename, error);
 			error_code = error;
-			free(random);
+			FREE(random);
 			goto cleanup;
 		}
 #endif
 
-		free(random);
+		FREE(random);
+		random = NULL;
 	}
 
 	uint32_t wrong = inspect_fs(&ctx, files, UINT32_MAX);
@@ -312,9 +312,9 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 
 cleanup:
 	for (uint32_t i = 0; i < FILE_COUNT; i++) {
-		free(files[i].filename);
+		FREE(files[i].filename);
 		if (files[i].content)
-			free(files[i].content);
+			FREE(files[i].content);
 	}
 
 	lilotafs_flash_clear_crash();

@@ -88,13 +88,13 @@ enum lilotafs_magic {
 struct lilotafs_context {
 #ifdef LILOTAFS_LOCAL
 	uint32_t partition_size;
+	uint8_t *flash_mmap;
 #else
 	const esp_partition_t *partition;
 	esp_partition_mmap_handle_t map_handle;
 #endif
 
 	uint32_t block_size;
-	uint8_t *flash_mmap;
 	uint32_t fs_head, fs_tail;
 	uint32_t largest_file;
 	bool has_wear_marker;
@@ -119,10 +119,6 @@ struct lilotafs_file_descriptor {
 	int flags;
 	int write_errno;
 };
-
-bool lilotafs_is_ptr_mmaped(struct lilotafs_context *ctx, const void *str);
-uint8_t lilotafs_mmap_read_byte(const void *ptr);
-void *lilotafs_aligned_memcpy(struct lilotafs_context *ctx, void *restrict dest, const void *restrict src, uint32_t n);
 
 uint32_t lilotafs_unmount(void *ctx);
 #ifdef LILOTAFS_LOCAL

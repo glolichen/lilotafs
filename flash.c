@@ -58,23 +58,15 @@ int lilotafs_flash_write(struct lilotafs_context *ctx, const void *buffer, uint3
 	if (address + length > lilotafs_flash_get_partition_size(ctx))
 		return 1;
 
-	uint8_t *write;
-	if (lilotafs_is_ptr_mmaped(ctx, buffer)) {
-		write = (uint8_t *) malloc(length);
-		lilotafs_aligned_memcpy(ctx, write, buffer, length);
-	}
-	else
-		write = (uint8_t *) buffer;
+	uint8_t *write = (uint8_t *) buffer;
 
 	// check if operation is legal (no changing 0 to 1)
 	for (uint32_t i = 0; i < length; i++) {
-		uint8_t current = lilotafs_mmap_read_byte(&ctx->flash_mmap[address + i]);
+		// uint8_t current = lilotafs_mmap_read_byte(&ctx->flash_mmap[address + i]);
+		uint8_t current;
+		lilotafs_flash_read(ctx, &current, address + i, 1);
 
-		uint8_t cur_write;
-		if (lilotafs_is_ptr_mmaped(ctx, write))
-			cur_write = lilotafs_mmap_read_byte(&write[i]);
-		else
-			cur_write = write[i];
+		uint8_t cur_write = write[i];
 
 		uint8_t byte = cur_write | current;
 		if (byte ^ current) {
@@ -107,9 +99,6 @@ int lilotafs_flash_write(struct lilotafs_context *ctx, const void *buffer, uint3
 		return LILOTAFS_EFLASH;
 #endif
 
-	if (lilotafs_is_ptr_mmaped(ctx, buffer))
-		free(write);
-
 	return 0;
 }
 
@@ -140,3 +129,14 @@ int lilotafs_flash_erase_region(struct lilotafs_context *ctx, uint32_t start, ui
 
 	return 0;
 }
+
+int lilotafs_flash_read(struct lilotafs_context *ctx, void *buffer, uint32_t address, uint32_t length) {
+#ifdef LILOTAFS_LOCAL
+	memcpy(buffer, ctx->flash_mmap + address, length);
+	return 0;
+#else
+	// FIXME
+	asdf
+#endif
+}
+

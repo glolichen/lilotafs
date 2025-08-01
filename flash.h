@@ -22,6 +22,7 @@ uint32_t lilotafs_flash_flush(struct lilotafs_context *ctx, uint32_t address, ui
 
 int lilotafs_flash_write(struct lilotafs_context *ctx, const void *buffer, uint32_t address, uint32_t length);
 int lilotafs_flash_erase_region(struct lilotafs_context *ctx, uint32_t start, uint32_t len);
+int lilotafs_flash_read(struct lilotafs_context *ctx, void *buffer, uint32_t address, uint32_t length);
 
 #endif
 
