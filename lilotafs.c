@@ -43,6 +43,7 @@ void *copy_file_mmap(struct lilotafs_context *ctx, uint32_t offset, uint32_t len
 	return file_data;
 }
 void copy_file_munmap(void *file_data, uint32_t len) {
+	(void) len;
 	free(file_data);
 }
 
@@ -61,10 +62,25 @@ uint32_t scan_for_header(void *ctx, uint32_t start, uint32_t partition_size) {
 	}
 	return UINT32_MAX;
 }
+
+bool str_ends_with(const char *str, const char *end, uint32_t len) {
+	uint32_t str_len = strnlen(str, len);
+	uint32_t end_len = strnlen(end, len);
+
+	if (str_len == len || end_len == len || str_len < end_len)
+		return false;
+
+	for (uint32_t i = 0; i < end_len; i++) {
+		if (str[str_len - end_len + i] != end[i])
+			return false;
+	}
+
+	return true;
+}
 bool file_is_kernel(struct lilotafs_context *ctx, uint32_t offset) {
 	char filename[64];
 	READ_FILENAME(filename, offset);
-	return strncmp(filename, LILOTAFS_KERNEL_FILENAME, 64) == 0;
+	return str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64);
 }
 
 int change_file_magic(void *ctx, uint32_t file_offset, uint16_t magic) {
@@ -150,7 +166,7 @@ uint32_t process_advance_header(void *ctx, uint32_t current_offset, uint32_t par
 	}
 
 	uint32_t next_offset = current_offset + sizeof(struct lilotafs_rec_header) + filename_len_padded;
-	if (strncmp(filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+	if (str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64))
 		next_offset = lilotafs_align_up_32(next_offset, LILOTAFS_DATA_ALIGN_KERNEL);
 	else
 		next_offset = lilotafs_align_up_32(next_offset, LILOTAFS_DATA_ALIGN);
@@ -162,7 +178,7 @@ uint32_t process_advance_header(void *ctx, uint32_t current_offset, uint32_t par
 
 	if (get_file_status(ctx, current_offset) == LILOTAFS_STATUS_COMMITTED) {
 		uint32_t total_file_size = sizeof(struct lilotafs_rec_header) + filename_len_padded;
-		if (strncmp(filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+		if (str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64))
 			total_file_size = lilotafs_align_up_32(total_file_size, LILOTAFS_DATA_ALIGN_KERNEL);
 		else
 			total_file_size = lilotafs_align_up_32(total_file_size, LILOTAFS_DATA_ALIGN);
@@ -309,7 +325,7 @@ int check_free_space(void *ctx, uint32_t current_offset, uint32_t write_offset,
 	}
 
 	uint32_t new_file_total = sizeof(struct lilotafs_rec_header) + strnlen(new_filename, 64) + 1;
-	if (strncmp(new_filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+	if (str_ends_with(new_filename, LILOTAFS_KERNEL_EXT, 64))
 		new_file_total += LILOTAFS_DATA_ALIGN_KERNEL;
 	else
 		new_file_total = lilotafs_align_up_32(new_file_total, LILOTAFS_DATA_ALIGN);
@@ -398,7 +414,7 @@ int append_file(void *ctx, const char *filename, uint32_t *current_offset, const
 	uint32_t filename_len = strnlen(filename, 64);
 	uint32_t partition_size = lilotafs_flash_get_partition_size(context);
 
-	bool is_kernel = strncmp(filename, LILOTAFS_KERNEL_FILENAME, 64) == 0;
+	bool is_kernel = str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64);
 	if (!is_wear_level && check_free_space(ctx, *current_offset, context->fs_tail, filename, len))
 		return LILOTAFS_ENOSPC;
 
@@ -474,7 +490,7 @@ int append_file(void *ctx, const char *filename, uint32_t *current_offset, const
 
 	// phase 2: write data
 	uint32_t data_offset = new_file_offset + sizeof(struct lilotafs_rec_header) + filename_len + 1;
-	if (strncmp(filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+	if (str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64))
 		data_offset = lilotafs_align_up_32(data_offset, LILOTAFS_DATA_ALIGN_KERNEL);
 	else
 		data_offset = lilotafs_align_up_32(data_offset, LILOTAFS_DATA_ALIGN);
@@ -524,7 +540,7 @@ int reserve_file(void *ctx, const char *filename, uint32_t *current_offset) {
 		return LILOTAFS_ENOSPC;
 
 	uint32_t new_file_total = sizeof(struct lilotafs_rec_header) + filename_len + 1;
-	if (strncmp(filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+	if (str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64))
 		new_file_total = lilotafs_align_up_32(new_file_total, LILOTAFS_DATA_ALIGN_KERNEL);
 	else
 		new_file_total = lilotafs_align_up_32(new_file_total, LILOTAFS_DATA_ALIGN);
@@ -564,7 +580,7 @@ int reserve_file(void *ctx, const char *filename, uint32_t *current_offset) {
 		return LILOTAFS_EFLASH;
 
 	uint32_t data_offset = new_file_offset + sizeof(struct lilotafs_rec_header) + filename_len + 1;
-	if (strncmp(filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+	if (str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64))
 		data_offset = lilotafs_align_up_32(data_offset, LILOTAFS_DATA_ALIGN_KERNEL);
 	else
 		data_offset = lilotafs_align_up_32(data_offset, LILOTAFS_DATA_ALIGN);
@@ -607,7 +623,7 @@ int clobber_file_data(void *ctx, uint32_t file) {
 	lilotafs_flash_read(ctx, filename, filename_offset, 64);
 
 	uint32_t data_offset = filename_offset + strnlen(filename, 64) + 1;
-	if (strncmp(filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+	if (str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64))
 		data_offset = lilotafs_align_up_32(data_offset, LILOTAFS_DATA_ALIGN_KERNEL);
 	else
 		data_offset = lilotafs_align_up_32(data_offset, LILOTAFS_DATA_ALIGN);
@@ -706,7 +722,7 @@ int wear_level_compact(void *ctx, uint32_t wear_marker, uint32_t num_files) {
 			READ_FILENAME(filename, cur_header);
 
 			uint32_t data_offset = cur_header + sizeof(struct lilotafs_rec_header) + strnlen(filename, 64) + 1;
-			if (strncmp(filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+			if (str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64))
 				data_offset = lilotafs_align_up_32(data_offset, LILOTAFS_DATA_ALIGN_KERNEL);
 			else
 				data_offset = lilotafs_align_up_32(data_offset, LILOTAFS_DATA_ALIGN);
@@ -859,7 +875,7 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 	
 	const void **flash_mmap_addr = (const void **) &context->flash_mmap;
 	esp_partition_mmap(partition, 0, 0x180000, ESP_PARTITION_MMAP_INST, flash_mmap_addr, &context->map_handle);
-	esp_partition_mmap(partition, 0, partition->size, ESP_PARTITION_MMAP_INST, flash_mmap_addr, &context->map_handle);
+	// esp_partition_mmap(partition, 0, partition->size, ESP_PARTITION_MMAP_INST, flash_mmap_addr, &context->map_handle);
 	
 	fprintf(stderr, "mmap addr: %p\n", context->flash_mmap);
 #endif
@@ -943,7 +959,7 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 				uint32_t block_size = context->block_size;
 
 				uint32_t data_start = offset + sizeof(struct lilotafs_rec_header) + reserved_filename_len + 1;
-				if (strncmp(reserved_filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+				if (str_ends_with(reserved_filename, LILOTAFS_KERNEL_EXT, 64))
 					data_start = lilotafs_align_up_32(data_start, LILOTAFS_DATA_ALIGN_KERNEL);
 				else
 					data_start = lilotafs_align_up_32(data_start, LILOTAFS_DATA_ALIGN);
@@ -1224,7 +1240,7 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 
 			uint32_t data_start = res_offset + sizeof(struct lilotafs_rec_header);
 			data_start += res_filename_len + 1;
-			if (strncmp(res_filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+			if (str_ends_with(res_filename, LILOTAFS_KERNEL_EXT, 64))
 				data_start = lilotafs_align_up_32(data_start, LILOTAFS_DATA_ALIGN_KERNEL);
 			else
 				data_start = lilotafs_align_up_32(data_start, LILOTAFS_DATA_ALIGN);
@@ -1293,14 +1309,14 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 
 				// copy data from migrating to reserved
 				write_offset += strnlen(mig_filename, 64) + 1;
-				if (strncmp(mig_filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+				if (str_ends_with(mig_filename, LILOTAFS_KERNEL_EXT, 64))
 					write_offset = lilotafs_align_up_32(write_offset, LILOTAFS_DATA_ALIGN_KERNEL);
 				else
 					write_offset = lilotafs_align_up_32(write_offset, LILOTAFS_DATA_ALIGN);
 
 				uint32_t mig_data_offset = mig_offset + sizeof(struct lilotafs_rec_header);
 				mig_data_offset += strnlen(mig_filename, 64) + 1;
-				if (strncmp(mig_filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+				if (str_ends_with(mig_filename, LILOTAFS_KERNEL_EXT, 64))
 					mig_data_offset = lilotafs_align_up_32(mig_data_offset, LILOTAFS_DATA_ALIGN_KERNEL);
 				else
 					mig_data_offset = lilotafs_align_up_32(mig_data_offset, LILOTAFS_DATA_ALIGN);
@@ -1424,7 +1440,7 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 			uint32_t migrating_offset = scan_result.migrating;
 			uint32_t migrating_data_offset = migrating_offset + sizeof(struct lilotafs_rec_header);
 			migrating_data_offset += strnlen(filename, 64) + 1;
-			if (strncmp(filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+			if (str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64))
 				migrating_data_offset = lilotafs_align_up_32(migrating_data_offset, LILOTAFS_DATA_ALIGN_KERNEL);
 			else
 				migrating_data_offset = lilotafs_align_up_32(migrating_data_offset, LILOTAFS_DATA_ALIGN);
@@ -1524,7 +1540,7 @@ int lilotafs_errno(void *ctx) {
 	return context->f_errno;
 }
 
-char *remove_prefix_slash(struct lilotafs_context *ctx, const char *filename) {
+char *remove_prefix_slash(const char *filename) {
 	uint32_t filename_len = strnlen(filename, 64);
 	char *actual_name = (char *) filename;
 
@@ -1544,7 +1560,7 @@ char *remove_prefix_slash(struct lilotafs_context *ctx, const char *filename) {
 	return actual_name;
 }
 
-char *get_file_directory(struct lilotafs_context *ctx, const char *file) {
+char *get_file_directory(const char *file) {
 	int last_slash = -1;
 
 	for (int i = strnlen(file, 64) - 1; i >= 0; i--) {
@@ -1598,9 +1614,9 @@ int lilotafs_open(void *ctx, const char *name, int flags, int mode) {
 		}
 	}
 	
-	char *actual_name = remove_prefix_slash(ctx, name);
+	char *actual_name = remove_prefix_slash(name);
 
-	char *file_dir = get_file_directory(ctx, actual_name);
+	char *file_dir = get_file_directory(actual_name);
 	if (file_dir != NULL) {
 		uint32_t found_dir = find_file_name(ctx, file_dir, false);
 		free(file_dir);
@@ -1728,7 +1744,7 @@ int lilotafs_close(void *ctx, int fd) {
 		READ_FILENAME(filename, previous_filename_offset);
 
 		context->fs_tail = desc.position + sizeof(struct lilotafs_rec_header) + desc.filename_len + 1;
-		if (strncmp(filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+		if (str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64))
 			context->fs_tail = lilotafs_align_up_32(context->fs_tail, LILOTAFS_DATA_ALIGN_KERNEL);
 		else
 			context->fs_tail = lilotafs_align_up_32(context->fs_tail, LILOTAFS_DATA_ALIGN);
@@ -1753,7 +1769,7 @@ int lilotafs_close(void *ctx, int fd) {
 		}
 
 		uint32_t previous_data_offset = previous_filename_offset + strnlen(filename, 64) + 1;
-		if (strncmp(filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+		if (str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64))
 			previous_data_offset = lilotafs_align_up_32(previous_data_offset, LILOTAFS_DATA_ALIGN_KERNEL);
 		else
 			previous_data_offset = lilotafs_align_up_32(previous_data_offset, LILOTAFS_DATA_ALIGN);
@@ -1865,7 +1881,7 @@ ssize_t lilotafs_write(void *ctx, int fd, const void *buffer, unsigned int len) 
 	
 	uint32_t data_start = desc->position + sizeof(struct lilotafs_rec_header);
 	data_start += strnlen(filename, 64) + 1;
-	if (strncmp(filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+	if (str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64))
 		data_start = lilotafs_align_up_32(data_start, LILOTAFS_DATA_ALIGN_KERNEL);
 	else
 		data_start = lilotafs_align_up_32(data_start, LILOTAFS_DATA_ALIGN);
@@ -1921,7 +1937,7 @@ ssize_t lilotafs_write(void *ctx, int fd, const void *buffer, unsigned int len) 
 
 		// update data_start to the new location of the file, at offset 0
 		data_start = sizeof(struct lilotafs_rec_header) + strnlen(filename, 64) + 1;
-		if (strncmp(filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+		if (str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64))
 			data_start = lilotafs_align_up_32(data_start, LILOTAFS_DATA_ALIGN_KERNEL);
 		else
 			data_start = lilotafs_align_up_32(data_start, LILOTAFS_DATA_ALIGN);
@@ -1985,7 +2001,7 @@ ssize_t lilotafs_read(void *ctx, int fd, void *buffer, size_t len) {
 	READ_FILENAME(filename, desc->position);
 
 	uint32_t data_offset = desc->position + sizeof(struct lilotafs_rec_header) + strnlen(filename, 64) + 1;
-	if (strncmp(filename, LILOTAFS_KERNEL_FILENAME, 64) == 0)
+	if (str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64))
 		data_offset = lilotafs_align_up_32(data_offset, LILOTAFS_DATA_ALIGN_KERNEL);
 	else
 		data_offset = lilotafs_align_up_32(data_offset, LILOTAFS_DATA_ALIGN);
@@ -2072,7 +2088,7 @@ struct lilotafs_dir {
 	uint32_t cur_file;
 };
 
-char *add_slash(struct lilotafs_context *ctx, const char *name) {
+char *add_slash(const char *name) {
 	int name_len = strnlen(name, 64);
 	if (name_len == 0)
 		return (char *) name;
@@ -2102,8 +2118,8 @@ int lilotafs_mkdir(void *ctx, const char *name, mode_t mode) {
 		}
 	}
 
-	char *name_no_prefix = remove_prefix_slash(ctx, name);
-	char *actual_name = add_slash(ctx, name_no_prefix);
+	char *name_no_prefix = remove_prefix_slash(name);
+	char *actual_name = add_slash(name_no_prefix);
 	if (name_no_prefix != actual_name && name_no_prefix != name)
 		free(name_no_prefix);
 
@@ -2130,8 +2146,8 @@ DIR *lilotafs_opendir(void *ctx, const char *name) {
 	if (strnlen(name, 64) == 0)
 		actual_name = (char *) name;
 	else {
-		char *name_no_prefix = remove_prefix_slash(ctx, name);
-		actual_name = add_slash(ctx, name_no_prefix);
+		char *name_no_prefix = remove_prefix_slash(name);
+		actual_name = add_slash(name_no_prefix);
 		if (name_no_prefix != actual_name && name_no_prefix != name)
 			free(name_no_prefix);
 
@@ -2172,7 +2188,7 @@ DIR *lilotafs_opendir(void *ctx, const char *name) {
 }
 
 // check if a file is "directly under" a directory and should be returned by readdir
-bool is_dir_child(struct lilotafs_context *ctx, const char *dir, const char *file) {
+bool is_dir_child(const char *dir, const char *file) {
 	// if dir is "" (length 0) then we are listing the root:
 	//  - files do not have slash anywhere
 	//  - directories only have one slash, which is the last character
@@ -2196,7 +2212,7 @@ bool is_dir_child(struct lilotafs_context *ctx, const char *dir, const char *fil
 
 	// check that everything up to the last slash (including the slash)
 	// is equal to the directory
-	char *file_dir = get_file_directory(ctx, file);
+	char *file_dir = get_file_directory(file);
 	if (file_dir == NULL)
 		return false;
 
@@ -2222,7 +2238,7 @@ struct dirent *lilotafs_readdir(void *ctx, DIR *pdir) {
 
 		if (get_file_status(ctx, cur_header) == LILOTAFS_STATUS_COMMITTED &&
 			strnlen(full_path, 64) != 0 &&
-			is_dir_child(ctx, dir->name, full_path) &&
+			is_dir_child(dir->name, full_path) &&
 			cur_header != dir->cur_file &&
 			strncmp(full_path, dir->name, 64) != 0
 		) {

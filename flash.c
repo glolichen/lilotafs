@@ -136,7 +136,8 @@ int lilotafs_flash_read(struct lilotafs_context *ctx, void *buffer, uint32_t add
 	return 0;
 #else
 	// FIXME
-	asdf
+	memcpy(buffer, ctx->flash_mmap + address, length);
+	return 0;
 #endif
 }
 

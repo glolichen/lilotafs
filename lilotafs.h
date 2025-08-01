@@ -17,7 +17,7 @@
 #define LILOTAFS_DATA_ALIGN_KERNEL 0x10000
 #define LILOTAFS_WEAR_LEVEL_MAX_RECORDS 5
 
-#define LILOTAFS_KERNEL_FILENAME "lilota.bin"
+#define LILOTAFS_KERNEL_EXT ".bin"
 
 #define ALIGN_DOWN_FUNC(bits) \
 static inline uint##bits##_t lilotafs_align_down_##bits(uint##bits##_t num, uint##bits##_t amount) { \
@@ -86,9 +86,9 @@ enum lilotafs_magic {
 };
 
 struct lilotafs_context {
+	uint8_t *flash_mmap;
 #ifdef LILOTAFS_LOCAL
 	uint32_t partition_size;
-	uint8_t *flash_mmap;
 #else
 	const esp_partition_t *partition;
 	esp_partition_mmap_handle_t map_handle;
