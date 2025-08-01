@@ -1,3 +1,5 @@
+#ifdef LILOTAFS_LOCAL
+
 #ifndef TORTURE_UTIL_H
 #define TORTURE_UTIL_H
 
@@ -12,5 +14,7 @@ struct table_entry {
 };
 
 uint32_t torture(const char *disk_name, uint64_t random_seed);
+
+#endif
 
 #endif

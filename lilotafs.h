@@ -21,21 +21,21 @@
 #define LILOTAFS_KERNEL_EXT ".bin"
 
 #define ALIGN_DOWN_FUNC(bits) \
-static inline uint##bits##_t lilotafs_align_down_##bits(uint##bits##_t num, uint##bits##_t amount) { \
+static uint##bits##_t __attribute__((unused)) lilotafs_align_down_##bits(uint##bits##_t num, uint##bits##_t amount) { \
 	return (num / amount) * amount; \
 }
 #define ALIGN_UP_FUNC(bits) \
-static inline uint##bits##_t lilotafs_align_up_##bits(uint##bits##_t num, uint##bits##_t amount) { \
+static uint##bits##_t __attribute__((unused)) lilotafs_align_up_##bits(uint##bits##_t num, uint##bits##_t amount) { \
 	return num % amount == 0 ? num : (lilotafs_align_down_##bits(num, amount) + amount); \
 }
 	
 #define ALIGN_DOWN_PTR(bits) \
-static inline void *lilotafs_align_down_ptr(void *ptr, uint##bits##_t amount) { \
+static void __attribute__((unused)) *lilotafs_align_down_ptr(void *ptr, uint##bits##_t amount) { \
 	uint##bits##_t ptr_int = (uint##bits##_t) ptr; \
 	return (void *) ((ptr_int / amount) * amount); \
 }
 #define ALIGN_UP_PTR(bits) \
-static inline void *lilotafs_align_up_ptr(void *ptr, uint##bits##_t amount) { \
+static void __attribute__((unused)) *lilotafs_align_up_ptr(void *ptr, uint##bits##_t amount) { \
 	uint##bits##_t ptr_int = (uint##bits##_t) ptr; \
 	return ptr_int % amount == 0 ? ptr : (void *) ((uint##bits##_t) lilotafs_align_down_ptr(ptr, amount) + amount); \
 }
@@ -97,7 +97,10 @@ struct lilotafs_context {
 
 	uint32_t block_size;
 	uint32_t fs_head, fs_tail;
-	uint32_t largest_file;
+	// worst case total size for a file
+	// includes header, filename and data
+	// assumes worse padding -- padding length == align requirement
+	uint32_t largest_worst_file_size;
 	bool has_wear_marker;
 	int f_errno;
 	int fd_list_size, fd_list_capacity;

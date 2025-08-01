@@ -1,5 +1,5 @@
-#include <unistd.h>
 #ifdef LILOTAFS_LOCAL
+#include <unistd.h>
 #include "torture_util.h"
 
 #include <string.h>
@@ -128,13 +128,21 @@ uint32_t torture(const char *disk_name, uint64_t random_seed) {
 
 	for (uint32_t i = 0; i < FILE_COUNT; i++) {
 		uint32_t filename_len = RANDOM_NUMBER(10, 63);
-		files[i].filename = (char *) malloc(filename_len + 1);
-		for (uint32_t j = 0; j < filename_len; j++) {
-			do {
-				files[i].filename[j] = RANDOM_NUMBER(33, 126);
-			} while (files[i].filename[j] == '/');
+
+		if (i == 0) {
+			files[i].filename = (char *) malloc(11);
+			memcpy(files[i].filename, "lilota.bin", 10);
+			files[i].filename[10] = 0;
 		}
-		files[i].filename[filename_len] = 0;
+		else {
+			files[i].filename = (char *) malloc(filename_len + 1);
+			for (uint32_t j = 0; j < filename_len; j++) {
+				do {
+					files[i].filename[j] = RANDOM_NUMBER(33, 126);
+				} while (files[i].filename[j] == '/');
+			}
+			files[i].filename[filename_len] = 0;
+		}
 
 		files[i].opened = false;
 		files[i].content_size = 0;

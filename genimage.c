@@ -72,6 +72,11 @@ int main(int argc, char *argv[]) {
 		}
 
 		printf("    adding file %s, size %ld\n", rel_filename, info.st_size);
+		printf("    head 0x%x, tail 0x%x, largest file %u\n",
+			lilotafs_get_head(&ctx),
+			lilotafs_get_tail(&ctx),
+			lilotafs_get_largest_file_size(&ctx)
+		);
 
 		uint8_t *file_data = (uint8_t *) calloc(info.st_size, sizeof(uint8_t));
 

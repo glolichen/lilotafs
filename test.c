@@ -1,5 +1,5 @@
-#include <dirent.h>
 #ifdef LILOTAFS_LOCAL
+#include <dirent.h>
 #include "flash.h"
 
 #include <stdint.h>

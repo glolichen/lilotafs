@@ -1,3 +1,4 @@
+#ifdef LILOTAFS_LOCAL
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
@@ -22,4 +23,5 @@ int main(int argc, char *argv[]) {
 	uint32_t code = torture(disk_name, seed);
 	return code;
 }
+#endif
 
