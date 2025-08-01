@@ -19,6 +19,9 @@
 #include "flash.h"
 #include "util.h"
 
+LILOTAFS_FUNC_STR_ENDS_WITH
+LILOTAFS_FUNC_GET_SMALLEST_COMPATIBLE
+
 #define READ_FILENAME(filename, offset) (lilotafs_flash_read(ctx, filename, offset + sizeof(struct lilotafs_rec_header), 64))
 
 uint16_t get_file_magic(struct lilotafs_context *ctx, uint32_t offset) {
@@ -63,20 +66,6 @@ uint32_t scan_for_header(void *ctx, uint32_t start, uint32_t partition_size) {
 	return UINT32_MAX;
 }
 
-bool str_ends_with(const char *str, const char *end, uint32_t len) {
-	uint32_t str_len = strnlen(str, len);
-	uint32_t end_len = strnlen(end, len);
-
-	if (str_len == len || end_len == len || str_len < end_len)
-		return false;
-
-	for (uint32_t i = 0; i < end_len; i++) {
-		if (str[str_len - end_len + i] != end[i])
-			return false;
-	}
-
-	return true;
-}
 bool file_is_kernel(struct lilotafs_context *ctx, uint32_t offset) {
 	char filename[64];
 	READ_FILENAME(filename, offset);
@@ -126,10 +115,6 @@ bool magic_is_wrap_marker(struct lilotafs_context *ctx, uint32_t file) {
 uint32_t process_advance_header(void *ctx, uint32_t current_offset, uint32_t partition_size) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
-	// if wrap header, back to start of partition
-	// the wrap marker magic is FA FA, it's possible we crash between writing these bytes
-	// resulting in FA FF, so we'll read the first byte
-	// since the two bytes of FA FA are equal, this will work on little and big endian
 	if (magic_is_wrap_marker(ctx, current_offset) || get_file_status(ctx, current_offset) == LILOTAFS_STATUS_WRAP_MARKER) {
 		// if we crash while writing the data_len field of the wrap marker
 		if (get_file_data_len(ctx, current_offset) != 0) {
@@ -842,20 +827,6 @@ uint32_t lilotafs_unmount(void *ctx) {
 	return LILOTAFS_SUCCESS;
 }
 
-// calculate the smallest integer greater than min_value, but can be written
-// into cur_value in flash without changing any 0 bits to 1
-uint32_t get_smallest_compatible(uint32_t min_value, uint32_t cur_value) {
-	// check if the file_size can be written into data_len without changing 0 to 1
-	// num = file_size | data_len: num has every 1 bit from file_size and data_len
-	// num xor data_len: xor returns all bits that are different
-	// since every 1 in data_len is also 1 in num, if there is any difference, it is because
-	// that bit is 0 in data_len, but 1 in file_size, which we don't allow
-	// keep incrementing file_size until the difference/xor is 0
-	min_value--;
-	while (((++min_value) | cur_value) ^ cur_value);
-	return min_value;
-}
-
 #ifdef LILOTAFS_LOCAL
 int lilotafs_mount(void *ctx, uint32_t partition_size, int fd) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
@@ -873,11 +844,11 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 	context->partition = partition;
 	context->block_size = partition->erase_size;
 	
-	const void **flash_mmap_addr = (const void **) &context->flash_mmap;
-	esp_partition_mmap(partition, 0, 0x180000, ESP_PARTITION_MMAP_INST, flash_mmap_addr, &context->map_handle);
+	// const void **flash_mmap_addr = (const void **) &context->flash_mmap;
+	// esp_partition_mmap(partition, 0, 0x180000, ESP_PARTITION_MMAP_INST, flash_mmap_addr, &context->map_handle);
 	// esp_partition_mmap(partition, 0, partition->size, ESP_PARTITION_MMAP_INST, flash_mmap_addr, &context->map_handle);
-	
-	fprintf(stderr, "mmap addr: %p\n", context->flash_mmap);
+	//
+	// fprintf(stderr, "mmap addr: %p\n", context->flash_mmap);
 #endif
 
 	context->largest_file = 0;
@@ -1107,7 +1078,7 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 	//   3. first record is LILOTAFS_START, second record is LILOTAFS_START_CLEAN
 	//      do not know that we are done cleaning up the first file
 	//      we clean up the first file, set the second record to LILOTAFS_START
-	//     a nd set the first record to 00
+	//      and set the first record to 00
 
 	// 1. if the first is LILOTAFS_START_CLEAN
 	if (get_file_magic(ctx, cur_header) == LILOTAFS_START_CLEAN) {

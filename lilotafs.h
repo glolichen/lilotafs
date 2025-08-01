@@ -3,12 +3,13 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 #include <sys/types.h>
 #include <dirent.h>
 
-#ifdef LILOTAFS_LOCAL
+#if defined(LILOTAFS_LOCAL)
 #include <sys/mman.h>
-#else
+#elif !defined(LILOTA_IS_BOOTLOADER)
 #include "esp_partition.h"
 #endif
 
@@ -86,10 +87,10 @@ enum lilotafs_magic {
 };
 
 struct lilotafs_context {
-	uint8_t *flash_mmap;
-#ifdef LILOTAFS_LOCAL
+#if defined(LILOTAFS_LOCAL)
 	uint32_t partition_size;
-#else
+	uint8_t *flash_mmap;
+#elif !defined(LILOTA_IS_BOOTLOADER)
 	const esp_partition_t *partition;
 	esp_partition_mmap_handle_t map_handle;
 #endif
@@ -120,10 +121,38 @@ struct lilotafs_file_descriptor {
 	int write_errno;
 };
 
+#define LILOTAFS_FUNC_STR_ENDS_WITH \
+static bool str_ends_with(const char *str, const char *end, uint32_t len) { \
+	uint32_t str_len = strnlen(str, len); \
+	uint32_t end_len = strlen(end); \
+	if (str_len == len || end_len == len || str_len < end_len) \
+		return false; \
+	for (uint32_t i = 0; i < end_len; i++) { \
+		if (str[str_len - end_len + i] != end[i]) \
+			return false; \
+	} \
+	return true; \
+}
+
+// calculate the smallest integer greater than min_value, but can be written
+// into cur_value in flash without changing any 0 bits to 1
+// check if the file_size can be written into data_len without changing 0 to 1
+// num = file_size | data_len: num has every 1 bit from file_size and data_len
+// num xor data_len: xor returns all bits that are different
+// since every 1 in data_len is also 1 in num, if there is any difference, it is because
+// that bit is 0 in data_len, but 1 in file_size, which we don't allow
+// keep incrementing file_size until the difference/xor is 0
+#define LILOTAFS_FUNC_GET_SMALLEST_COMPATIBLE \
+uint32_t get_smallest_compatible(uint32_t min_value, uint32_t cur_value) { \
+	min_value--; \
+	while (((++min_value) | cur_value) ^ cur_value); \
+	return min_value; \
+}
+
 uint32_t lilotafs_unmount(void *ctx);
-#ifdef LILOTAFS_LOCAL
+#if defined(LILOTAFS_LOCAL)
 int lilotafs_mount(void *ctx, uint32_t partition_size, int fd);
-#else
+#elif !defined(LILOTA_IS_BOOTLOADER)
 int lilotafs_mount(void *ctx, const esp_partition_t *partition);
 #endif
 

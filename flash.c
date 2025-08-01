@@ -135,8 +135,7 @@ int lilotafs_flash_read(struct lilotafs_context *ctx, void *buffer, uint32_t add
 	memcpy(buffer, ctx->flash_mmap + address, length);
 	return 0;
 #else
-	// FIXME
-	memcpy(buffer, ctx->flash_mmap + address, length);
+	esp_partition_read(ctx->partition, address, buffer, length);
 	return 0;
 #endif
 }
