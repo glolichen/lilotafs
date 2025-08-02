@@ -2333,18 +2333,9 @@ int lilotafs_stat(void *ctx, const char *path, struct stat *st) {
 		return -1;
 	}
 
-	uint32_t file_size = sizeof(struct lilotafs_rec_header);
-	file_size += strnlen(actual_name, 64) + 1;
-	if (str_ends_with(path, LILOTAFS_KERNEL_EXT, 64))
-		file_size = lilotafs_align_up_32(file_size, LILOTAFS_DATA_ALIGN_KERNEL);
-	else
-		file_size = lilotafs_align_up_32(file_size, LILOTAFS_DATA_ALIGN);
-	file_size += get_file_data_len(ctx, file_found);
-	file_size = lilotafs_align_up_32(file_size, LILOTAFS_HEADER_ALIGN);
-
 	memset(st, 0, sizeof(*st));
 	st->st_ino = file_found;
-	st->st_size = file_size;
+	st->st_size = get_file_data_len(ctx, file_found);
 	st->st_mode = path[filename_len_raw - 1] == '/' ? S_IFDIR : S_IFREG;
 
 	context->f_errno = LILOTAFS_SUCCESS;
