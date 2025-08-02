@@ -2,6 +2,7 @@
 #include <dirent.h>
 #include <stdint.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 
 #ifdef LILOTAFS_LOCAL
 #include <sys/mman.h>
@@ -1160,8 +1161,8 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 	// because we do not know how much of that file was successfully written
 	context->fs_tail = cur_header;
 
-	// FIXME: we redid how files are written
-	// need to fix crash recovery
+	uint32_t old_reserved = scan_result.reserved;
+	uint32_t old_migrating = scan_result.migrating;
 
 	if (scan_result.reserved != UINT32_MAX) {
 		PRINTF("crash recovery: reserved\n");
@@ -2306,6 +2307,48 @@ uint32_t lilotafs_count_files(void *ctx) {
 	}
 
 	return count;
+}
+
+int lilotafs_stat(void *ctx, const char *path, struct stat *st) {
+	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
+
+	if (st == NULL) {
+		context->f_errno = LILOTAFS_EINVAL;
+		return -1;
+	}
+
+	uint32_t filename_len_raw = strnlen(path, 64);
+	if (filename_len_raw > LILOTAFS_MAX_FILENAME_LEN) {
+		context->f_errno = LILOTAFS_EINVAL;
+		return -1;
+	}
+
+	char *actual_name = remove_prefix_slash(path);
+
+	uint32_t file_found = find_file_name(context, actual_name, true);
+	if (file_found == UINT32_MAX) {
+		if (actual_name != path)
+			free(actual_name);
+		context->f_errno = LILOTAFS_ENOENT;
+		return -1;
+	}
+
+	uint32_t file_size = sizeof(struct lilotafs_rec_header);
+	file_size += strnlen(actual_name, 64) + 1;
+	if (str_ends_with(path, LILOTAFS_KERNEL_EXT, 64))
+		file_size = lilotafs_align_up_32(file_size, LILOTAFS_DATA_ALIGN_KERNEL);
+	else
+		file_size = lilotafs_align_up_32(file_size, LILOTAFS_DATA_ALIGN);
+	file_size += get_file_data_len(ctx, file_found);
+	file_size = lilotafs_align_up_32(file_size, LILOTAFS_HEADER_ALIGN);
+
+	memset(st, 0, sizeof(*st));
+	st->st_ino = file_found;
+	st->st_size = file_size;
+	st->st_mode = path[filename_len_raw - 1] == '/' ? S_IFDIR : S_IFREG;
+
+	context->f_errno = LILOTAFS_SUCCESS;
+	return 0;
 }
 
 uint32_t lilotafs_get_largest_file_size(void *ctx) {

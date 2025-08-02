@@ -43,8 +43,7 @@ int main(int argc, char *argv[]) {
 	
 	printf("formatting disk %s, size %d\n", disk_name, DISK_SIZE);
 	
-	// wc -c will automatically add 1 for the new line
-	int prefix_length = atoi(argv[2]) - 1;
+	int prefix_length = strlen(argv[2]);
 	struct stat info;
 	for (int i = 3; i < argc; i++) {
 		const char *filename = argv[i];

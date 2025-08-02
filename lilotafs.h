@@ -5,6 +5,7 @@
 #include <stdbool.h>
 #include <string.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <dirent.h>
 
 #if defined(LILOTAFS_LOCAL)
@@ -173,6 +174,8 @@ int lilotafs_mkdir(void *ctx, const char *name, mode_t mode);
 DIR *lilotafs_opendir(void *ctx, const char *name);
 struct dirent *lilotafs_readdir(void *ctx, DIR *pdir);
 int lilotafs_closedir(void *ctx, DIR *pdir);
+
+int lilotafs_stat(void *ctx, const char *path, struct stat *st);
 
 uint32_t lilotafs_count_files(void *ctx);
 
