@@ -65,7 +65,7 @@ int main(int argc, char *argv[]) {
 				return 2;
 			}
 
-			printf("    added directory %s %lu\n", rel_filename, strlen(rel_filename));
+			printf("    adding directory %s %lu\n", rel_filename, strlen(rel_filename));
 			free(rel_filename);
 			continue;
 		}
