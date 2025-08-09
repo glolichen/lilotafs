@@ -16,6 +16,7 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdarg.h>
 
 #include "flash.h"
 #include "util.h"
@@ -2341,6 +2342,72 @@ int lilotafs_stat(void *ctx, const char *path, struct stat *st) {
 	context->f_errno = LILOTAFS_SUCCESS;
 	return 0;
 }
+
+#ifndef LILOTAFS_LOCAL
+// mmap imem cmd = 0x1111, mmap dmem cmd = 0xDDDD
+// mmap variadic params: void **out_ptr, esp_partition_mmap_handle_t *out_handle
+// munmap cmd = 0x3333
+// munmap variadic params: esp_partition_mmap_handle_t out_handle
+int lilotafs_ioctl(void *ctx, int fd, int cmd, va_list args) {
+	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
+	
+	if (check_fd(context, fd)) {
+		context->f_errno = LILOTAFS_EBADF;
+		return LILOTAFS_EBADF;
+	}
+
+	if (cmd == 0x3333) {
+		esp_partition_mmap_handle_t mmap_handle = va_arg(args, esp_partition_mmap_handle_t);
+		esp_partition_munmap(mmap_handle);
+		return LILOTAFS_SUCCESS;
+	}
+
+	if (cmd != 0x1111 && cmd != 0xDDDD) {
+		context->f_errno = LILOTAFS_EINVAL;
+		return LILOTAFS_EINVAL;
+	}
+
+	const struct lilotafs_file_descriptor *desc = &context->fd_list[fd];
+	
+	if (desc->flags & O_WRONLY) {
+		context->f_errno = LILOTAFS_EINVAL;
+		return LILOTAFS_EINVAL;
+	}
+
+	uint32_t file_offset = desc->position;
+
+	char filename[64];
+	
+	READ_FILENAME(filename, file_offset);
+
+	uint32_t data_len = get_file_data_len(ctx, file_offset);
+
+	uint32_t data_start = desc->position + sizeof(struct lilotafs_rec_header);
+	data_start += strnlen(filename, 64) + 1;
+	if (str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64))
+		data_start = lilotafs_align_up_32(data_start, LILOTAFS_DATA_ALIGN_KERNEL);
+	else
+		data_start = lilotafs_align_up_32(data_start, LILOTAFS_DATA_ALIGN);
+
+	const void **out_ptr = va_arg(args, const void **);
+	esp_partition_mmap_handle_t *out_handle = va_arg(args, esp_partition_mmap_handle_t *);
+	
+	int err = esp_partition_mmap(
+		context->partition, data_start, data_len,
+		cmd == 0x1111 ? ESP_PARTITION_MMAP_INST : ESP_PARTITION_MMAP_DATA,
+		out_ptr, out_handle
+	);
+	
+	if (err != ESP_OK) {
+		context->f_errno = LILOTAFS_EFLASH;
+		return LILOTAFS_EFLASH;
+	}
+	
+    va_end(args);
+
+	return LILOTAFS_START;
+}
+#endif
 
 uint32_t lilotafs_get_largest_file_size(void *ctx) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;

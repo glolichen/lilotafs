@@ -177,6 +177,10 @@ int lilotafs_closedir(void *ctx, DIR *pdir);
 
 int lilotafs_stat(void *ctx, const char *path, struct stat *st);
 
+#ifndef LILOTAFS_LOCAL
+int lilotafs_ioctl(void *ctx, int fd, int cmd, va_list args);
+#endif
+
 uint32_t lilotafs_count_files(void *ctx);
 
 uint32_t lilotafs_get_largest_file_size(void *ctx);
