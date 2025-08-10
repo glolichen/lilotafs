@@ -3,12 +3,14 @@
 #include <stdint.h>
 #include <fcntl.h>
 #include <sys/stat.h>
+#include <errno.h>
 
 #ifdef LILOTAFS_LOCAL
 #include <sys/mman.h>
 #include <sys/types.h>
 #else
 #include "spi_flash_mmap.h"
+#include "esp_log.h"
 #endif
 
 #include <assert.h>
@@ -78,15 +80,15 @@ int change_file_magic(void *ctx, uint32_t file_offset, uint16_t magic) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 	uint32_t magic_addr = file_offset + offsetof(struct lilotafs_rec_header, magic);
 	if (lilotafs_flash_write(context, &magic, magic_addr, 2))
-		return LILOTAFS_EFLASH;
-	return LILOTAFS_SUCCESS;
+		return -1;
+	return 0;
 }
 int change_file_status(void *ctx, uint32_t file_offset, uint8_t status) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 	uint32_t status_addr = file_offset + offsetof(struct lilotafs_rec_header, status);
 	if (lilotafs_flash_write(context, &status, status_addr, 1))
-		return LILOTAFS_EFLASH;
-	return LILOTAFS_SUCCESS;
+		return -1;
+	return 0;
 }
 
 // for little endian: write the data_len in REVERSE (highest value byte first)
@@ -97,9 +99,9 @@ int change_file_data_len(void *ctx, uint32_t file_offset, uint32_t data_len) {
 	for (int i = 3; i >= 0; i--) {
 		uint8_t byte = (data_len >> (8 * i)) & 0xFF;
 		if (lilotafs_flash_write(context, &byte, data_len_addr + i, 1))
-			return LILOTAFS_EFLASH;
+			return -1;
 	}
-	return LILOTAFS_SUCCESS;
+	return 0;
 }
 
 bool magic_is_wrap_marker(struct lilotafs_context *ctx, uint32_t file) {
@@ -338,7 +340,7 @@ int check_free_space(void *ctx, uint32_t current_offset, uint32_t write_offset,
 	uint32_t current_position = write_offset;
 	if (new_file_total + wrap_marker_total > partition_size - current_position) {
 		if (log_wrap)
-			return LILOTAFS_ENOSPC;
+			return ENOSPC;
 		log_wrap = true;
 		current_position = 0;
 	}
@@ -348,7 +350,7 @@ int check_free_space(void *ctx, uint32_t current_offset, uint32_t write_offset,
 	// check if we can write the old file
 	if (old_file_total + wrap_marker_total > partition_size - current_position) {
 		if (log_wrap)
-			return LILOTAFS_ENOSPC;
+			return ENOSPC;
 		log_wrap = true;
 		current_position = 0;
 	}
@@ -358,7 +360,7 @@ int check_free_space(void *ctx, uint32_t current_offset, uint32_t write_offset,
 	// also check if we can add a wear marker...? could be helpful
 	if (wear_marker_total + wrap_marker_total > partition_size - current_position) {
 		if (log_wrap)
-			return LILOTAFS_ENOSPC;
+			return ENOSPC;
 		log_wrap = true;
 		current_position = 0;
 	}
@@ -369,7 +371,7 @@ int check_free_space(void *ctx, uint32_t current_offset, uint32_t write_offset,
 	for (uint32_t i = 0; i < 2; i++) {
 		if (largest_file_total + wrap_marker_total > partition_size - current_position) {
 			if (log_wrap)
-				return LILOTAFS_ENOSPC;
+				return ENOSPC;
 			log_wrap = true;
 			current_position = 0;
 		}
@@ -379,18 +381,18 @@ int check_free_space(void *ctx, uint32_t current_offset, uint32_t write_offset,
 		// we cannot end such that the tail is in the same sector as the head,
 		uint32_t sector_size = context->block_size;
 		if (log_wrap && current_position / sector_size == context->fs_head / sector_size)
-			return LILOTAFS_ENOSPC;
+			return ENOSPC;
 
 		// if we wrapped the log / inserted a wear marker for any of the two files,
 		// tail must be in front of head
 		if (log_wrap && current_position >= context->fs_head)
-			return LILOTAFS_ENOSPC;
+			return ENOSPC;
 	}
 
 	// if no wrap, there is no problem since we still have free space
 	// after tail and before the end of partition
 
-	return LILOTAFS_SUCCESS;
+	return 0;
 }
 
 // current_offset is updated with the new offset, provide pointer to UINT32_MAX if only creating
@@ -405,7 +407,7 @@ int append_file(void *ctx, const char *filename, uint32_t *current_offset, const
 
 	bool is_kernel = str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64);
 	if (!is_wear_level && check_free_space(ctx, *current_offset, context->fs_tail, filename, len))
-		return LILOTAFS_ENOSPC;
+		return ENOSPC;
 
 	uint32_t new_file_total = calculate_total_file_size(is_kernel, filename_len, len);
 
@@ -417,7 +419,7 @@ int append_file(void *ctx, const char *filename, uint32_t *current_offset, const
 		uint32_t current_position = context->fs_tail;
 		if (new_file_total + wrap_marker_total > partition_size - current_position) {
 			if (log_wrap)
-				return LILOTAFS_ENOSPC;
+				return ENOSPC;
 			log_wrap = true;
 			current_position = 0;
 		}
@@ -436,10 +438,10 @@ int append_file(void *ctx, const char *filename, uint32_t *current_offset, const
 
 		uint32_t sector_size = context->block_size;
 		if (log_wrap && current_position / sector_size == context->fs_head / sector_size)
-			return LILOTAFS_ENOSPC;
+			return ENOSPC;
 
 		if (log_wrap && current_position >= context->fs_head)
-			return LILOTAFS_ENOSPC;
+			return ENOSPC;
 	}
 
 	// uint32_t new_file_total = sizeof(struct lilotafs_rec_header) + filename_len + 1;
@@ -450,7 +452,7 @@ int append_file(void *ctx, const char *filename, uint32_t *current_offset, const
 	// mark old file as migrating
 	if (*current_offset != UINT32_MAX) {
 		if (change_file_status(context, *current_offset, LILOTAFS_STATUS_MIGRATING))
-			return LILOTAFS_EFLASH;
+			return EIO;
 	}
 
 	uint32_t new_file_offset = context->fs_tail;
@@ -463,7 +465,7 @@ int append_file(void *ctx, const char *filename, uint32_t *current_offset, const
 		wrap_marker.data_len = 0;
 
 		if (lilotafs_flash_write(context, &wrap_marker, context->fs_tail, sizeof(struct lilotafs_rec_header)))
-			return LILOTAFS_EFLASH;
+			return EIO;
 		new_file_offset = 0;
 	}
 
@@ -475,7 +477,7 @@ int append_file(void *ctx, const char *filename, uint32_t *current_offset, const
 	file_header.data_len = 0xFFFFFFFF;
 
 	if (lilotafs_flash_write(context, &file_header, new_file_offset, sizeof(struct lilotafs_rec_header)))
-		return LILOTAFS_EFLASH;
+		return EIO;
 
 	// phase 2: write data
 	uint32_t data_offset = new_file_offset + sizeof(struct lilotafs_rec_header) + filename_len + 1;
@@ -484,22 +486,22 @@ int append_file(void *ctx, const char *filename, uint32_t *current_offset, const
 	else
 		data_offset = lilotafs_align_up_32(data_offset, LILOTAFS_DATA_ALIGN);
 	if (lilotafs_flash_write(context, filename, new_file_offset + sizeof(struct lilotafs_rec_header), filename_len + 1))
-		return LILOTAFS_EFLASH;
+		return EIO;
 	if (len) {
 		if (lilotafs_flash_write(context, buffer, data_offset, len))
-			return LILOTAFS_EFLASH;
+			return EIO;
 	}
 
 	// phase 3: set size and commit
 	if (change_file_data_len(ctx, new_file_offset, len))
-		return LILOTAFS_EFLASH;
+		return EIO;
 	if (change_file_status(ctx, new_file_offset, want_status))
-		return LILOTAFS_EFLASH;
+		return EIO;
 
 	// phase 4: delete old
 	if (*current_offset != UINT32_MAX) {
 		if (change_file_status(context, *current_offset, LILOTAFS_STATUS_DELETED))
-			return LILOTAFS_EFLASH;
+			return EIO;
 	}
 	
 	context->fs_tail = lilotafs_align_up_32(data_offset + len, LILOTAFS_HEADER_ALIGN);
@@ -509,13 +511,13 @@ int append_file(void *ctx, const char *filename, uint32_t *current_offset, const
 		uint32_t current_offset = UINT32_MAX;
 		context->has_wear_marker = true;
 		int code = append_file(context, &empty, &current_offset, NULL, 0, LILOTAFS_STATUS_WEAR_MARKER, false, false);
-		if (code != LILOTAFS_SUCCESS)
+		if (code != 0)
 			return code;
 	}
 
 	*current_offset = new_file_offset;
 
-	return LILOTAFS_SUCCESS;
+	return 0;
 }
 
 // move the current file to migrating, and add a blank file
@@ -526,7 +528,7 @@ int reserve_file(void *ctx, const char *filename, uint32_t *current_offset) {
 	uint32_t partition_size = lilotafs_flash_get_partition_size(context);
 
 	if (check_free_space(ctx, *current_offset, context->fs_tail, filename, 0))
-		return LILOTAFS_ENOSPC;
+		return ENOSPC;
 
 	uint32_t new_file_total = sizeof(struct lilotafs_rec_header) + filename_len + 1;
 	if (str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64))
@@ -542,7 +544,7 @@ int reserve_file(void *ctx, const char *filename, uint32_t *current_offset) {
 	// mark old file as migrating
 	if (*current_offset != UINT32_MAX) {
 		if (change_file_status(context, *current_offset, LILOTAFS_STATUS_MIGRATING))
-			return LILOTAFS_EFLASH;
+			return EIO;
 	}
 
 	uint32_t new_file_offset = context->fs_tail;
@@ -555,7 +557,7 @@ int reserve_file(void *ctx, const char *filename, uint32_t *current_offset) {
 		wrap_marker.data_len = 0;
 
 		if (lilotafs_flash_write(context, &wrap_marker, context->fs_tail, sizeof(struct lilotafs_rec_header)))
-			return LILOTAFS_EFLASH;
+			return EIO;
 		new_file_offset = 0;
 	}
 
@@ -566,7 +568,7 @@ int reserve_file(void *ctx, const char *filename, uint32_t *current_offset) {
 	file_header.data_len = 0xFFFFFFFF;
 
 	if (lilotafs_flash_write(context, &file_header, new_file_offset, sizeof(struct lilotafs_rec_header)))
-		return LILOTAFS_EFLASH;
+		return EIO;
 
 	uint32_t data_offset = new_file_offset + sizeof(struct lilotafs_rec_header) + filename_len + 1;
 	if (str_ends_with(filename, LILOTAFS_KERNEL_EXT, 64))
@@ -574,12 +576,12 @@ int reserve_file(void *ctx, const char *filename, uint32_t *current_offset) {
 	else
 		data_offset = lilotafs_align_up_32(data_offset, LILOTAFS_DATA_ALIGN);
 	if (lilotafs_flash_write(context, filename, new_file_offset + sizeof(struct lilotafs_rec_header), filename_len + 1))
-		return LILOTAFS_EFLASH;
+		return EIO;
 
 	context->fs_tail = lilotafs_align_up_32(data_offset, LILOTAFS_HEADER_ALIGN);
 	*current_offset = new_file_offset;
 
-	return LILOTAFS_SUCCESS;
+	return 0;
 }
 
 int remove_false_magic(void *ctx, uint32_t start, uint32_t size) {
@@ -594,18 +596,18 @@ int remove_false_magic(void *ctx, uint32_t start, uint32_t size) {
 		if (magic == LILOTAFS_RECORD || magic == LILOTAFS_START || magic == LILOTAFS_START_CLEAN) {
 			uint16_t zero = 0;
 			if (lilotafs_flash_write(context, &zero, i, 2))
-				return LILOTAFS_EFLASH;
+				return EIO;
 		}
 	}
 
-	return LILOTAFS_SUCCESS;
+	return 0;
 }
 
 int clobber_file_data(void *ctx, uint32_t file) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
 	if (magic_is_wrap_marker(ctx, file) || get_file_status(ctx, file) == LILOTAFS_STATUS_WRAP_MARKER)
-		return LILOTAFS_SUCCESS;
+		return 0;
 
 	char filename[64];
 	uint32_t filename_offset = file + sizeof(struct lilotafs_rec_header);
@@ -642,20 +644,20 @@ int erase_file(void *ctx, uint32_t cur_offset, uint32_t next_offset) {
 	if (next_offset % sector_size != 0) {
 		uint32_t sector_start = lilotafs_align_down_32(next_offset, sector_size);
 		if (remove_false_magic(context, sector_start, next_offset % sector_size))
-			return LILOTAFS_EFLASH;
+			return EIO;
 	}
 
 	// previous offset cannot be in the same sector as tail
 	if (context->fs_tail / sector_size == cur_offset / sector_size)
-		return LILOTAFS_ENOSPC;
+		return ENOSPC;
 
 	// erase old blocks, in reverse order (large address -> small address)
 	for (uint32_t sector = next_offset / sector_size; sector >= cur_offset / sector_size + 1; sector--) {
 		if (lilotafs_flash_erase_region(context, (sector - 1) * sector_size, sector_size))
-			return LILOTAFS_EFLASH;
+			return EIO;
 	}
 
-	return LILOTAFS_SUCCESS;
+	return 0;
 }
 
 // this function has caused sooo many problems
@@ -669,7 +671,7 @@ int wear_level_compact(void *ctx, uint32_t wear_marker, uint32_t num_files) {
 
 	// delete wear marker
 	if (change_file_status(context, wear_marker, LILOTAFS_STATUS_DELETED))
-		return LILOTAFS_EFLASH;
+		return EIO;
 
 	// this is the number of files we will copy to the tail
 	// we set a limit defined by the macro, but also do not move more than the number of files
@@ -723,19 +725,19 @@ int wear_level_compact(void *ctx, uint32_t wear_marker, uint32_t num_files) {
 				data_len, LILOTAFS_STATUS_COMMITTED, false, true
 			);
 			copy_file_munmap(file_data, data_len);
-			if (code != LILOTAFS_SUCCESS)
+			if (code != 0)
 				return code;
 		}
 
 		// we need to be deliberate about the order to make modifications in case of a crash
 		// first, set the current file to LILOTAFS_START_CLEAN, indicating this file is the old LILOTAFS_START
 		if (change_file_magic(context, next_header, LILOTAFS_START_CLEAN))
-			return LILOTAFS_EFLASH;
+			return EIO;
 
 		// we cannot have any magic numbers in 32 byte boundaries, or they will be detected as files
 		// we want to clobber the filename too, so data start is the file name
 		int code = clobber_file_data(context, cur_header);
-		if (code != LILOTAFS_SUCCESS)
+		if (code != 0)
 			return code;
 
 		// if the file crosses a flash boundary, or we are wrapping
@@ -744,7 +746,7 @@ int wear_level_compact(void *ctx, uint32_t wear_marker, uint32_t num_files) {
 			// the wrap marker does not actually cross the flash erase boundar
 			// we can simply erase all of the last sector
 			code = erase_file(context, cur_header, next_header == 0 ? lilotafs_flash_get_partition_size(context) : next_header);
-			if (code != LILOTAFS_SUCCESS)
+			if (code != 0)
 				return code;
 		}
 
@@ -755,7 +757,7 @@ int wear_level_compact(void *ctx, uint32_t wear_marker, uint32_t num_files) {
 		// done with processing the current file
 		// now advance LILOTAFS_START and delete the just-moved file
 		if (change_file_magic(context, next_header, LILOTAFS_START))
-			return LILOTAFS_EFLASH;
+			return EIO;
 
 		// NOTE: if we crash here, there is one or two LILOTAFS_START's
 		// next is definitely LILOTAFS_START, and current may have been erased
@@ -763,7 +765,7 @@ int wear_level_compact(void *ctx, uint32_t wear_marker, uint32_t num_files) {
 		// do not set magic to 0 if the sector has been erased
 		if (next_header / sector_size == cur_header / sector_size) {
 			if (change_file_magic(context, cur_header, 0))
-				return LILOTAFS_EFLASH;
+				return EIO;
 		}
 
 		context->fs_head = next_header;
@@ -773,7 +775,7 @@ int wear_level_compact(void *ctx, uint32_t wear_marker, uint32_t num_files) {
 			break;
 	}
 
-	return LILOTAFS_SUCCESS;
+	return 0;
 }
 
 uint32_t find_file_name(void *ctx, const char *name, bool accept_migrating) {
@@ -828,7 +830,7 @@ uint32_t lilotafs_unmount(void *ctx) {
 	spi_flash_munmap(context->map_handle);
 #endif
 
-	return LILOTAFS_SUCCESS;
+	return 0;
 }
 
 #ifdef LILOTAFS_LOCAL
@@ -964,8 +966,8 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 					uint32_t cur_block = lilotafs_align_down_32(addr, block_size);
 					if (prev_block != cur_block && cur_block != starting_block) {
 						if (lilotafs_flash_erase_region(context, prev_block, block_size)) {
-							context->f_errno = LILOTAFS_EFLASH;
-							return LILOTAFS_EFLASH;
+							context->f_errno = EIO;
+							return EIO;
 						}
 					}
 
@@ -1016,12 +1018,12 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 				}
 
 				if (change_file_data_len(ctx, scan_result.reserved, data_len)) {
-					context->f_errno = LILOTAFS_EFLASH;
-					return LILOTAFS_EFLASH;
+					context->f_errno = EIO;
+					return EIO;
 				}
 				if (change_file_status(ctx, scan_result.reserved, LILOTAFS_STATUS_DELETED)) {
-					context->f_errno = LILOTAFS_EFLASH;
-					return LILOTAFS_EFLASH;
+					context->f_errno = EIO;
+					return EIO;
 				}
 			}
 		}
@@ -1050,12 +1052,12 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 		char empty = 0;
 		// write record and empty filename
 		if (lilotafs_flash_write(context, &new_header, 0, sizeof(struct lilotafs_rec_header))) {
-			context->f_errno = LILOTAFS_EFLASH;
-			return LILOTAFS_EFLASH;
+			context->f_errno = EIO;
+			return EIO;
 		}
 		if (lilotafs_flash_write(context, &empty, sizeof(struct lilotafs_rec_header), 1)) {
-			context->f_errno = LILOTAFS_EFLASH;
-			return LILOTAFS_EFLASH;
+			context->f_errno = EIO;
+			return EIO;
 		}
 
 		context->fs_head = 0;
@@ -1065,8 +1067,8 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 		PRINTF("head = 0x%lx\n", (POINTER_SIZE) context->fs_head);
 		PRINTF("tail = 0x%lx\n", (POINTER_SIZE) context->fs_tail);
 
-		context->f_errno = LILOTAFS_SUCCESS;
-		return LILOTAFS_SUCCESS;
+		context->f_errno = 0;
+		return 0;
 	}
 
 	// first, check for crash
@@ -1087,8 +1089,8 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 	// 1. if the first is LILOTAFS_START_CLEAN
 	if (get_file_magic(ctx, cur_header) == LILOTAFS_START_CLEAN) {
 		if (change_file_magic(context, cur_header, LILOTAFS_START)) {
-			context->f_errno = LILOTAFS_EFLASH;
-			return LILOTAFS_EFLASH;
+			context->f_errno = EIO;
+			return EIO;
 		}
 	}
 	else {
@@ -1100,8 +1102,8 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 			if (get_file_magic(ctx, next_header) == LILOTAFS_START) {
 				PRINTF("next afterwards is FS_START\n");
 				if (change_file_magic(context, cur_header, 0)) {
-					context->f_errno = LILOTAFS_EFLASH;
-					return LILOTAFS_EFLASH;
+					context->f_errno = EIO;
+					return EIO;
 				}
 				cur_header = next_header;
 			}
@@ -1111,7 +1113,7 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 
 				// we cannot have any magic numbers in 32 byte boundaries, or they will be detected as files
 				int code = clobber_file_data(context, cur_header);
-				if (code != LILOTAFS_SUCCESS) {
+				if (code != 0) {
 					context->f_errno = code;
 					return code;
 				}
@@ -1123,7 +1125,7 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 					// the wrap marker does not actually cross the flash erase boundar
 					// we can simply erase all of the last sector
 					code = erase_file(context, cur_header, next_header == 0 ? lilotafs_flash_get_partition_size(context) : next_header);
-					if (code != LILOTAFS_SUCCESS) {
+					if (code != 0) {
 						context->f_errno = code;
 						return code;
 					}
@@ -1132,15 +1134,15 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 				// done with processing the current file
 				// now advance LILOTAFS_START and delete the just-moved file
 				if (change_file_magic(context, next_header, LILOTAFS_START)) {
-					context->f_errno = LILOTAFS_EFLASH;
-					return LILOTAFS_EFLASH;
+					context->f_errno = EIO;
+					return EIO;
 				}
 
 				// do not set magic to 0 if the sector has been erased
 				if (next_header / sector_size == cur_header / sector_size) {
 					if (change_file_magic(context, cur_header, 0)) {
-						context->f_errno = LILOTAFS_EFLASH;
-						return LILOTAFS_EFLASH;
+						context->f_errno = EIO;
+						return EIO;
 					}
 				}
 
@@ -1162,8 +1164,8 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 	// because we do not know how much of that file was successfully written
 	context->fs_tail = cur_header;
 
-	uint32_t old_reserved = scan_result.reserved;
-	uint32_t old_migrating = scan_result.migrating;
+	// uint32_t old_reserved = scan_result.reserved;
+	// uint32_t old_migrating = scan_result.migrating;
 
 	if (scan_result.reserved != UINT32_MAX) {
 		PRINTF("crash recovery: reserved\n");
@@ -1232,8 +1234,8 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 
 			for (uint32_t sector = first_sector; sector < last_sector; sector += context->block_size) {
 				if (lilotafs_flash_erase_region(context, sector, context->block_size)) {
-					context->f_errno = LILOTAFS_EFLASH;
-					return LILOTAFS_EFLASH;
+					context->f_errno = EIO;
+					return EIO;
 				}
 			}
 
@@ -1253,12 +1255,12 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 				file_data_len = get_smallest_compatible(file_data_len, get_file_data_len(ctx, reserved));
 
 			if (change_file_data_len(ctx, reserved, file_data_len)) {
-				context->f_errno = LILOTAFS_EFLASH;
-				return LILOTAFS_EFLASH;
+				context->f_errno = EIO;
+				return EIO;
 			}
 			if (change_file_status(context, reserved, LILOTAFS_STATUS_DELETED)) {
-				context->f_errno = LILOTAFS_EFLASH;
-				return LILOTAFS_EFLASH;
+				context->f_errno = EIO;
+				return EIO;
 			}
 
 			// context->fs_tail = lilotafs_align_up_32(data_start + file_data_len, LILOTAFS_DATA_ALIGN);
@@ -1278,8 +1280,8 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 				// finish writing file name
 				uint32_t write_offset = res_offset + sizeof(struct lilotafs_rec_header);
 				if (lilotafs_flash_write(context, mig_filename, write_offset, strnlen(mig_filename, 64) + 1)) {
-					context->f_errno = LILOTAFS_EFLASH;
-					return LILOTAFS_EFLASH;
+					context->f_errno = EIO;
+					return EIO;
 				}
 
 				// copy data from migrating to reserved
@@ -1305,13 +1307,13 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 					// no space to write here, close the current file and append
 					if (change_file_data_len(context, reserved, 0)) {
 						copy_file_munmap(mig_data, mig_data_len);
-						context->f_errno = LILOTAFS_EFLASH;
-						return LILOTAFS_EFLASH;
+						context->f_errno = EIO;
+						return EIO;
 					}
 					if (change_file_status(context, reserved, LILOTAFS_STATUS_DELETED)) {
 						copy_file_munmap(mig_data, mig_data_len);
-						context->f_errno = LILOTAFS_EFLASH;
-						return LILOTAFS_EFLASH;
+						context->f_errno = EIO;
+						return EIO;
 					}
 
 					context->fs_tail = lilotafs_align_up_32(write_offset, LILOTAFS_HEADER_ALIGN);
@@ -1330,23 +1332,23 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 				else {
 					if (lilotafs_flash_write(context, mig_data, write_offset, mig_data_len)) {
 						copy_file_munmap(mig_data, mig_data_len);
-						context->f_errno = LILOTAFS_EFLASH;
-						return LILOTAFS_EFLASH;
+						context->f_errno = EIO;
+						return EIO;
 					}
 					copy_file_munmap(mig_data, mig_data_len);
 
 					// write data_len, commit and delete migrating
 					if (change_file_data_len(context, reserved, get_file_data_len(ctx, migrating))) {
-						context->f_errno = LILOTAFS_EFLASH;
-						return LILOTAFS_EFLASH;
+						context->f_errno = EIO;
+						return EIO;
 					}
 					if (change_file_status(context, reserved, LILOTAFS_STATUS_COMMITTED)) {
-						context->f_errno = LILOTAFS_EFLASH;
-						return LILOTAFS_EFLASH;
+						context->f_errno = EIO;
+						return EIO;
 					}
 					if (change_file_status(context, migrating, LILOTAFS_STATUS_DELETED)) {
-						context->f_errno = LILOTAFS_EFLASH;
-						return LILOTAFS_EFLASH;
+						context->f_errno = EIO;
+						return EIO;
 					}
 
 					// write_offset is this file's start of data
@@ -1367,8 +1369,8 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 
 				char zero = 0;
 				if (lilotafs_flash_write(ctx, &zero, res_filename_offset, 1)) {
-					context->f_errno = LILOTAFS_EFLASH;
-					return LILOTAFS_EFLASH;
+					context->f_errno = EIO;
+					return EIO;
 				}
 
 				// officially, the file name length is 0, because of null terminator
@@ -1379,12 +1381,12 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 				uint32_t data_len = res_filename_offset + last_non_ff - data_start + 1;
 
 				if (change_file_data_len(context, reserved, data_len)) {
-					context->f_errno = LILOTAFS_EFLASH;
-					return LILOTAFS_EFLASH;
+					context->f_errno = EIO;
+					return EIO;
 				}
 				if (change_file_status(context, reserved, LILOTAFS_STATUS_DELETED)) {
-					context->f_errno = LILOTAFS_EFLASH;
-					return LILOTAFS_EFLASH;
+					context->f_errno = EIO;
+					return EIO;
 				}
 
 				context->fs_tail = lilotafs_align_up_32(data_start + data_len, LILOTAFS_HEADER_ALIGN);
@@ -1427,15 +1429,15 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 				mig_data_len, LILOTAFS_STATUS_COMMITTED, false, false
 			);
 			copy_file_munmap(mig_data, mig_data_len);
-			if (code != LILOTAFS_SUCCESS) {
+			if (code != 0) {
 				context->f_errno = code;
 				return code;
 			}
 		}
 
 		if (change_file_status(context, scan_result.migrating, LILOTAFS_STATUS_DELETED)) {
-			context->f_errno = LILOTAFS_EFLASH;
-			return LILOTAFS_EFLASH;
+			context->f_errno = EIO;
+			return EIO;
 		}
 	}
 
@@ -1446,7 +1448,7 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 	if (wear_marker != UINT32_MAX) {
 		PRINTF("wear marker\n");
 		int code = wear_level_compact(context, wear_marker, num_files);
-		if (code != LILOTAFS_SUCCESS) {
+		if (code != 0) {
 			context->f_errno = code;
 			return code;
 		}
@@ -1456,8 +1458,8 @@ int lilotafs_mount(void *ctx, const esp_partition_t *partition) {
 	}
 
 	PRINTF("mount complete\n");
-	context->f_errno = LILOTAFS_SUCCESS;
-	return LILOTAFS_SUCCESS;
+	context->f_errno = 0;
+	return 0;
 }
 
 
@@ -1563,18 +1565,18 @@ int lilotafs_open(void *ctx, const char *name, int flags, int mode) {
 
 	uint32_t filename_len_raw = strnlen(name, 64);
 	if (filename_len_raw > LILOTAFS_MAX_FILENAME_LEN) {
-		context->f_errno = LILOTAFS_EINVAL;
+		context->f_errno = EINVAL;
 		return -1;
 	}
 
 	// cannot end with slash (end with slash are directories)
 	if (name[filename_len_raw - 1] == '/') {
-		context->f_errno = LILOTAFS_EINVAL;
+		context->f_errno = EINVAL;
 		return -1;
 	}
 
 	if (flags != O_RDONLY && flags != O_WRONLY && flags != (O_WRONLY | O_CREAT)) {
-		context->f_errno = LILOTAFS_EPERM;
+		context->f_errno = EPERM;
 		return -1;
 	}
 
@@ -1584,7 +1586,7 @@ int lilotafs_open(void *ctx, const char *name, int flags, int mode) {
 		if (!descriptor->in_use)
 			continue;
 		if ((descriptor->flags & O_WRONLY) && (flags & O_WRONLY)) {
-			context->f_errno = LILOTAFS_EPERM;
+			context->f_errno = EPERM;
 			return -1;
 		}
 	}
@@ -1598,7 +1600,7 @@ int lilotafs_open(void *ctx, const char *name, int flags, int mode) {
 		if (found_dir == UINT32_MAX) {
 			if (actual_name != name)
 				free(actual_name);
-			context->f_errno = LILOTAFS_ENOENT;
+			context->f_errno = ENOENT;
 			return -1;
 		}
 	}
@@ -1613,7 +1615,7 @@ int lilotafs_open(void *ctx, const char *name, int flags, int mode) {
 		.filename_len = strnlen(actual_name, 64),
 		.offset = 0,
 		.flags = flags,
-		.write_errno = LILOTAFS_SUCCESS,
+		.write_errno = 0,
 	};
 
 	if (flags == O_RDONLY) {
@@ -1621,7 +1623,7 @@ int lilotafs_open(void *ctx, const char *name, int flags, int mode) {
 		if (file_found == UINT32_MAX) {
 			if (actual_name != name)
 				free(actual_name);
-			context->f_errno = LILOTAFS_ENOENT;
+			context->f_errno = ENOENT;
 			return -1;
 		}
 		fd.position = file_found;
@@ -1638,14 +1640,14 @@ int lilotafs_open(void *ctx, const char *name, int flags, int mode) {
 		else if (!(flags & O_CREAT)) {
 			if (actual_name != name)
 				free(actual_name);
-			context->f_errno = LILOTAFS_ENOENT;
+			context->f_errno = ENOENT;
 			return -1;
 		}
 
 		// reserve a file at the end, keep status at reserved
 		// commit file on close
 		uint32_t code = reserve_file(context, actual_name, &fd.position);
-		if (code != LILOTAFS_SUCCESS) {
+		if (code != 0) {
 			if (actual_name != name)
 				free(actual_name);
 			context->f_errno = code;
@@ -1657,14 +1659,14 @@ int lilotafs_open(void *ctx, const char *name, int flags, int mode) {
 	if (fd_index == -1) {
 		if (actual_name != name)
 			free(actual_name);
-		context->f_errno = LILOTAFS_EUNKNOWN;
+		context->f_errno = ENXIO;
 		return -1;
 	}
 
 	// scan again to get the largest file
 	scan_headers(ctx, context->fs_head);
 
-	context->f_errno = LILOTAFS_SUCCESS;
+	context->f_errno = 0;
 	return fd_index;
 }
 
@@ -1672,8 +1674,8 @@ int lilotafs_close(void *ctx, int fd) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
 	if (check_fd(context, fd)) {
-		context->f_errno = LILOTAFS_EBADF;
-		return LILOTAFS_EBADF;
+		context->f_errno = EBADF;
+		return -1;
 	}
 
 	struct lilotafs_file_descriptor desc = context->fd_list[fd];
@@ -1687,28 +1689,28 @@ int lilotafs_close(void *ctx, int fd) {
 
 	// reading file -> do nothing else
 	if (!(desc.flags & O_WRONLY)) {
-		context->f_errno = LILOTAFS_SUCCESS;
-		return LILOTAFS_SUCCESS;
+		context->f_errno = 0;
+		return 0;
 	}
 
 	uint32_t file_header = desc.position;
 
 	// length of a file remains FFFFFFFF (-1) until closed
 	if (change_file_data_len(ctx, file_header, desc.offset)) {
-		context->f_errno = LILOTAFS_EFLASH;
-		return LILOTAFS_EFLASH;
+		context->f_errno = EIO;
+		return -1;
 	}
 
 	// writing a file, and an error occurred in lilotafs_write
 	// the new file is hopeless, restore the old/migrating file
 	// but only after setting data_len
-	if (desc.write_errno != LILOTAFS_SUCCESS) {
+	if (desc.write_errno != 0) {
 		// delete this file
 		// note that if we crash afterward immediately afterwards, we will be in the
 		// "migrating but no reserved" case, which does exactly what we are doing now anyway
 		if (change_file_status(ctx, file_header, LILOTAFS_STATUS_DELETED)) {
-			context->f_errno = LILOTAFS_EFLASH;
-			return LILOTAFS_EFLASH;
+			context->f_errno = EIO;
+			return -1;
 		}
 
 		uint32_t previous_offset = desc.previous_position;
@@ -1732,15 +1734,15 @@ int lilotafs_close(void *ctx, int fd) {
 			uint32_t current_offset = UINT32_MAX;
 			context->has_wear_marker = true;
 			int code = append_file(context, &empty, &current_offset, NULL, 0, LILOTAFS_STATUS_WEAR_MARKER, false, false);
-			if (code != LILOTAFS_SUCCESS) {
+			if (code != 0) {
 				context->f_errno = code;
 				return code;
 			}
 		}
 
 		if (desc.previous_position == UINT32_MAX) {
-			context->f_errno = LILOTAFS_SUCCESS;
-			return LILOTAFS_SUCCESS;
+			context->f_errno = 0;
+			return 0;
 		}
 
 		uint32_t previous_data_offset = previous_filename_offset + strnlen(filename, 64) + 1;
@@ -1763,31 +1765,31 @@ int lilotafs_close(void *ctx, int fd) {
 		);
 		copy_file_munmap(previous_data, previous_data_len);
 
-		if (code != LILOTAFS_SUCCESS) {
+		if (code != 0) {
 			context->f_errno = code;
 			return code;
 		}
 
 		if (change_file_status(ctx, previous_offset, LILOTAFS_STATUS_DELETED)) {
-			context->f_errno = LILOTAFS_EFLASH;
-			return LILOTAFS_EFLASH;
+			context->f_errno = EIO;
+			return -1;
 		}
 
-		context->f_errno = LILOTAFS_SUCCESS;
-		return LILOTAFS_SUCCESS;
+		context->f_errno = 0;
+		return 0;
 	}
 
 	if (change_file_status(ctx, file_header, LILOTAFS_STATUS_COMMITTED)) {
-		context->f_errno = LILOTAFS_EFLASH;
-		return LILOTAFS_EFLASH;
+		context->f_errno = EIO;
+		return -1;
 	}
 
 	// delete the previous file
 	if (desc.previous_position != UINT32_MAX) {
 		uint32_t old_file = desc.previous_position;
 		if (change_file_status(context, old_file, LILOTAFS_STATUS_DELETED)) {
-			context->f_errno = LILOTAFS_EFLASH;
-			return LILOTAFS_EFLASH;
+			context->f_errno = EIO;
+			return -1;
 		}
 	}
 
@@ -1806,32 +1808,32 @@ int lilotafs_close(void *ctx, int fd) {
 		uint32_t current_offset = UINT32_MAX;
 		context->has_wear_marker = true;
 		int code = append_file(context, &empty, &current_offset, NULL, 0, LILOTAFS_STATUS_WEAR_MARKER, false, false);
-		if (code != LILOTAFS_SUCCESS) {
+		if (code != 0) {
 			context->f_errno = code;
 			return code;
 		}
 	}
 
-	context->f_errno = LILOTAFS_SUCCESS;
-	return LILOTAFS_SUCCESS;
+	context->f_errno = 0;
+	return 0;
 }
 
 ssize_t lilotafs_write(void *ctx, int fd, const void *buffer, unsigned int len) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
 	if (check_fd(context, fd)) {
-		context->f_errno = LILOTAFS_EBADF;
+		context->f_errno = EBADF;
 		return -1;
 	}
 
 	struct lilotafs_file_descriptor *desc = &context->fd_list[fd];
 
 	// if there's been a failure before, cannot proceed
-	if (desc->write_errno != LILOTAFS_SUCCESS)
+	if (desc->write_errno != 0)
 		return -1;
 
 	if (!(desc->flags & O_WRONLY)) {
-		context->f_errno = LILOTAFS_EPERM;
+		context->f_errno = EPERM;
 		desc->write_errno = context->f_errno;
 		return -1;
 	}
@@ -1848,7 +1850,7 @@ ssize_t lilotafs_write(void *ctx, int fd, const void *buffer, unsigned int len) 
 	uint32_t file_data_len = desc->offset + len;
 
 	int error_code = check_free_space(ctx, desc->position, desc->position, filename, file_data_len);
-	if (error_code != LILOTAFS_SUCCESS) {
+	if (error_code != 0) {
 		context->f_errno = error_code;
 		desc->write_errno = context->f_errno;
 		return -1;
@@ -1876,19 +1878,19 @@ ssize_t lilotafs_write(void *ctx, int fd, const void *buffer, unsigned int len) 
 		wrap_marker.data_len = 0;
 
 		if (lilotafs_flash_write(context, &wrap_marker, wrap_offset, sizeof(struct lilotafs_rec_header))) {
-			context->f_errno = LILOTAFS_EFLASH;
+			context->f_errno = EIO;
 			desc->write_errno = context->f_errno;
 			return -1;
 		}
 
 		// 2. write the data len to the reserved file, and set its status to 0 / deleted
 		if (change_file_data_len(ctx, header, desc->offset)) {
-			context->f_errno = LILOTAFS_EFLASH;
+			context->f_errno = EIO;
 			desc->write_errno = context->f_errno;
 			return -1;
 		}
 		if (change_file_status(ctx, header, LILOTAFS_STATUS_DELETED)) {
-			context->f_errno = LILOTAFS_EFLASH;
+			context->f_errno = EIO;
 			desc->write_errno = context->f_errno;
 			return -1;
 		}
@@ -1898,7 +1900,7 @@ ssize_t lilotafs_write(void *ctx, int fd, const void *buffer, unsigned int len) 
 		// 3. at offset 0, add a new reserved file (FE) and leave its datalen FF FF FF FF
 		uint32_t new_offset = UINT32_MAX;
 		error_code = reserve_file(ctx, filename, &new_offset);
-		if (error_code != LILOTAFS_SUCCESS) {
+		if (error_code != 0) {
 			context->f_errno = error_code;
 			desc->write_errno = context->f_errno;
 			return -1;
@@ -1919,7 +1921,7 @@ ssize_t lilotafs_write(void *ctx, int fd, const void *buffer, unsigned int len) 
 
 		if (lilotafs_flash_write(ctx, old_data, data_start, desc->offset)) {
 			copy_file_munmap(old_data, desc->offset);
-			context->f_errno = LILOTAFS_EFLASH;
+			context->f_errno = EIO;
 			desc->write_errno = context->f_errno;
 			return -1;
 		}
@@ -1930,7 +1932,7 @@ ssize_t lilotafs_write(void *ctx, int fd, const void *buffer, unsigned int len) 
  
 	// write buffer data starting from the offset stored in FD table
 	if (lilotafs_flash_write(context, buffer, data_start + desc->offset, len)) {
-		context->f_errno = LILOTAFS_EFLASH;
+		context->f_errno = EIO;
 		desc->write_errno = context->f_errno;
 		return -1;
 	}
@@ -1954,13 +1956,13 @@ int lilotafs_get_size(void *ctx, int fd) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
 	if (check_fd(context, fd)) {
-		context->f_errno = LILOTAFS_EBADF;
+		context->f_errno = EBADF;
 		return -1;
 	}
 
 	struct lilotafs_file_descriptor descriptor = context->fd_list[fd];
 
-	context->f_errno = LILOTAFS_SUCCESS;
+	context->f_errno = 0;
 	return get_file_data_len(ctx, descriptor.position);
 }
 
@@ -1968,13 +1970,13 @@ ssize_t lilotafs_read(void *ctx, int fd, void *buffer, size_t len) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
 	if (check_fd(context, fd)) {
-		context->f_errno = LILOTAFS_EBADF;
+		context->f_errno = EBADF;
 		return -1;
 	}
 
 	struct lilotafs_file_descriptor *desc = &context->fd_list[fd];
 	if (desc->flags != O_RDONLY) {
-		context->f_errno = LILOTAFS_EPERM;
+		context->f_errno = EPERM;
 		return -1;
 	}
 
@@ -1993,7 +1995,7 @@ ssize_t lilotafs_read(void *ctx, int fd, void *buffer, size_t len) {
 	lilotafs_flash_read(ctx, buffer, data_offset + desc->offset, len);
 	desc->offset += len;
 
-	context->f_errno = LILOTAFS_SUCCESS;
+	context->f_errno = 0;
 	return len;
 }
 
@@ -2001,13 +2003,13 @@ off_t lilotafs_lseek(void *ctx, int fd, off_t offset, int whence) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
 	if (check_fd(context, fd)) {
-		context->f_errno = LILOTAFS_EBADF;
+		context->f_errno = EBADF;
 		return -1;
 	}
 
 	struct lilotafs_file_descriptor *descriptor = &context->fd_list[fd];
 	if (descriptor->flags != O_RDONLY) {
-		context->f_errno = LILOTAFS_EPERM;
+		context->f_errno = EPERM;
 		return -1;
 	}
 
@@ -2023,11 +2025,11 @@ off_t lilotafs_lseek(void *ctx, int fd, off_t offset, int whence) {
 		descriptor->offset = size + offset;
 	}
 	else {
-		context->f_errno = LILOTAFS_EINVAL;
+		context->f_errno = EINVAL;
 		return -1;
 	}
 
-	context->f_errno = LILOTAFS_SUCCESS;
+	context->f_errno = 0;
 	return descriptor->offset;
 }
 
@@ -2041,7 +2043,7 @@ off_t lilotafs_lseek(void *ctx, int fd, off_t offset, int whence) {
 // 	struct lilotafs_file_descriptor descriptor = context->fd_list[fd];
 // 	struct lilotafs_rec_header *header = (struct lilotafs_rec_header *) (context->flash_mmap + descriptor.position);
 // 	if (change_file_status(context, header, LILOTAFS_STATUS_DELETED))
-// 		return LILOTAFS_EFLASH;
+// 		return EIO;
 //
 // 	if (get_file_data_len(ctx, header) == context->largest_filename_len) {
 // 		context->largest_file_size = 0, context->largest_filename_len = 0;
@@ -2056,7 +2058,7 @@ off_t lilotafs_lseek(void *ctx, int fd, off_t offset, int whence) {
 // 		return append_file(context, &empty, &current_offset, NULL, 0, LILOTAFS_STATUS_WEAR_MARKER, false);
 // 	}
 //
-// 	return LILOTAFS_SUCCESS;
+// 	return 0;
 // }
 
 struct dirent lilotafs_de;
@@ -2094,7 +2096,7 @@ int lilotafs_mkdir(void *ctx, const char *name, mode_t mode) {
 		if (!descriptor->in_use)
 			continue;
 		if (descriptor->flags & O_WRONLY) {
-			context->f_errno = LILOTAFS_EPERM;
+			context->f_errno = EPERM;
 			return -1;
 		}
 	}
@@ -2106,7 +2108,7 @@ int lilotafs_mkdir(void *ctx, const char *name, mode_t mode) {
 
 	uint32_t offset = UINT32_MAX;
 	int code = append_file(ctx, actual_name, &offset, NULL, 0, LILOTAFS_STATUS_COMMITTED, false, false);
-	if (code != LILOTAFS_SUCCESS) {
+	if (code != 0) {
 		if (actual_name != name)
 			free(actual_name);
 		context->f_errno = code;
@@ -2116,8 +2118,8 @@ int lilotafs_mkdir(void *ctx, const char *name, mode_t mode) {
 	if (actual_name != name)
 		free(actual_name);
 
-	context->f_errno = LILOTAFS_SUCCESS;
-	return LILOTAFS_SUCCESS;
+	context->f_errno = 0;
+	return 0;
 }
 
 DIR *lilotafs_opendir(void *ctx, const char *name) {
@@ -2144,7 +2146,7 @@ DIR *lilotafs_opendir(void *ctx, const char *name) {
 	if (dir == NULL) {
 		if (actual_name != name)
 			free(actual_name);
-		context->f_errno = LILOTAFS_EUNKNOWN;
+		context->f_errno = ENXIO;
 		return NULL;
 	}
 
@@ -2161,7 +2163,7 @@ DIR *lilotafs_opendir(void *ctx, const char *name) {
 	dir->cur_file = context->fs_head;
 
 	if (lilotafs_flash_flush(ctx, 0, lilotafs_flash_get_partition_size(ctx))) {
-		context->f_errno = LILOTAFS_EFLASH;
+		context->f_errno = EIO;
 		return NULL;
 	}
 
@@ -2314,13 +2316,13 @@ int lilotafs_stat(void *ctx, const char *path, struct stat *st) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 
 	if (st == NULL) {
-		context->f_errno = LILOTAFS_EINVAL;
+		context->f_errno = EINVAL;
 		return -1;
 	}
 
 	uint32_t filename_len_raw = strnlen(path, 64);
 	if (filename_len_raw > LILOTAFS_MAX_FILENAME_LEN) {
-		context->f_errno = LILOTAFS_EINVAL;
+		context->f_errno = EINVAL;
 		return -1;
 	}
 
@@ -2330,7 +2332,7 @@ int lilotafs_stat(void *ctx, const char *path, struct stat *st) {
 	if (file_found == UINT32_MAX) {
 		if (actual_name != path)
 			free(actual_name);
-		context->f_errno = LILOTAFS_ENOENT;
+		context->f_errno = ENOENT;
 		return -1;
 	}
 
@@ -2339,7 +2341,7 @@ int lilotafs_stat(void *ctx, const char *path, struct stat *st) {
 	st->st_size = get_file_data_len(ctx, file_found);
 	st->st_mode = path[filename_len_raw - 1] == '/' ? S_IFDIR : S_IFREG;
 
-	context->f_errno = LILOTAFS_SUCCESS;
+	context->f_errno = 0;
 	return 0;
 }
 
@@ -2352,26 +2354,26 @@ int lilotafs_ioctl(void *ctx, int fd, int cmd, va_list args) {
 	struct lilotafs_context *context = (struct lilotafs_context *) ctx;
 	
 	if (check_fd(context, fd)) {
-		context->f_errno = LILOTAFS_EBADF;
-		return LILOTAFS_EBADF;
+		context->f_errno = EBADF;
+		return -1;
 	}
 
 	if (cmd == 0x3333) {
 		esp_partition_mmap_handle_t mmap_handle = va_arg(args, esp_partition_mmap_handle_t);
 		esp_partition_munmap(mmap_handle);
-		return LILOTAFS_SUCCESS;
+		return 0;
 	}
 
 	if (cmd != 0x1111 && cmd != 0xDDDD) {
-		context->f_errno = LILOTAFS_EINVAL;
-		return LILOTAFS_EINVAL;
+		context->f_errno = EINVAL;
+		return -1;
 	}
 
 	const struct lilotafs_file_descriptor *desc = &context->fd_list[fd];
 	
 	if (desc->flags & O_WRONLY) {
-		context->f_errno = LILOTAFS_EINVAL;
-		return LILOTAFS_EINVAL;
+		context->f_errno = EINVAL;
+		return -1;
 	}
 
 	uint32_t file_offset = desc->position;
@@ -2392,20 +2394,22 @@ int lilotafs_ioctl(void *ctx, int fd, int cmd, va_list args) {
 	const void **out_ptr = va_arg(args, const void **);
 	esp_partition_mmap_handle_t *out_handle = va_arg(args, esp_partition_mmap_handle_t *);
 	
+	esp_log_level_set("mmap", ESP_LOG_NONE);
 	int err = esp_partition_mmap(
 		context->partition, data_start, data_len,
 		cmd == 0x1111 ? ESP_PARTITION_MMAP_INST : ESP_PARTITION_MMAP_DATA,
 		out_ptr, out_handle
 	);
+	esp_log_level_set("mmap", ESP_LOG_WARN);
 	
 	if (err != ESP_OK) {
-		context->f_errno = LILOTAFS_EFLASH;
-		return LILOTAFS_EFLASH;
+		context->f_errno = EIO;
+		return -1;
 	}
 	
     va_end(args);
 
-	return LILOTAFS_START;
+	return 0;
 }
 #endif
 

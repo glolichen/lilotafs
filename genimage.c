@@ -38,7 +38,7 @@ int main(int argc, char *argv[]) {
 	int err = lilotafs_mount(&ctx, DISK_SIZE, disk);
 	ctx.has_wear_marker = true;
 
-	if (err != LILOTAFS_SUCCESS)
+	if (err != 0)
 		return err;
 	
 	printf("formatting disk %s, size %d\n", disk_name, DISK_SIZE);
@@ -108,7 +108,7 @@ int main(int argc, char *argv[]) {
 	}
 	
 	err = lilotafs_unmount(&ctx);
-	if (err != LILOTAFS_SUCCESS)
+	if (err != 0)
 		return err;
 
 	printf("generating image complete!\n");

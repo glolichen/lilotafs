@@ -46,11 +46,11 @@ uint32_t lilotafs_flash_flush(struct lilotafs_context *ctx, uint32_t address, ui
 	spi_flash_host_inst_t *host = ctx->partition->flash_chip->host;
 	esp_err_t (*flush_cache)(spi_flash_host_inst_t *host, uint32_t addr, uint32_t size) = host->driver->flush_cache;
 	if (!flush_cache)
-		return LILOTAFS_SUCCESS;
+		return 0;
 	esp_err_t err = (*flush_cache)(host, address, size);
 	if (err != ESP_OK)
 		return err;
-	return LILOTAFS_SUCCESS;
+	return 0;
 #endif
 }
 
@@ -96,7 +96,7 @@ int lilotafs_flash_write(struct lilotafs_context *ctx, const void *buffer, uint3
 		return 1;
 
 	if (lilotafs_flash_flush(ctx, 0, lilotafs_flash_get_partition_size(ctx)))
-		return LILOTAFS_EFLASH;
+		return 1;
 #endif
 
 	return 0;
@@ -124,7 +124,7 @@ int lilotafs_flash_erase_region(struct lilotafs_context *ctx, uint32_t start, ui
 		return 1;
 
 	if (lilotafs_flash_flush(ctx, 0, lilotafs_flash_get_partition_size(ctx)))
-		return LILOTAFS_EFLASH;
+		return 1;
 #endif
 
 	return 0;

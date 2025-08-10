@@ -56,18 +56,6 @@ ALIGN_UP_FUNC(32)
 ALIGN_DOWN_FUNC(64)
 ALIGN_UP_FUNC(64)
 
-#define LILOTAFS_SUCCESS 0 // Operation successful
-#define LILOTAFS_ENOSPC (-1) // Insufficient space (4294967294)
-#define LILOTAFS_EINVAL (-2) // Invalid parameters (...93)
-#define LILOTAFS_EEXIST (-3) // File already exists (create-only) (...92)
-#define LILOTAFS_ENOENT (-4) // File not found (...91)
-#define LILOTAFS_ESPIPE (-5) // Seek not supported on writable files (...90)
-#define LILOTAFS_EBADF (-6) // Invalid file descriptor (...89)
-#define LILOTAFS_EMFILE (-7) // Too many open files (...88)
-#define LILOTAFS_EPERM (-8) // Operation not permitted (...87)
-#define LILOTAFS_EFLASH (-9) // Flash write problem (...86)
-#define LILOTAFS_EUNKNOWN (-10) // ??? (...85)
-
 #define LILOTAFS_MAX_FILENAME_LEN 63
 	
 enum lilotafs_record_status {

@@ -1,5 +1,4 @@
-CC=clang
-# CC=gcc
+CC=gcc
 CFLAGS=-I. -Wall -Wextra -O0 \
 		-D LILOTAFS_LOCAL -D SECTOR_SIZE=4096 \
 		-D DISK_SIZE=$(DISK_SIZE) \
