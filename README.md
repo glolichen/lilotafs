@@ -415,7 +415,7 @@ If a crash occurs during wear leveling, it will be detected and processed when f
 
 ## 6. Torture Testing
 
-This repository also includes a torture testing suite `torture_util.c`, `torture_util.h`, `torture.c`, `megatorture.py` to subjet the file system to extreme requests to test its functionality, including crash recovery.
+This repository also includes a torture testing suite `torture_util.c`, `torture_util.h`, `torture.c`, `megatorture.py` to subject the file system to extreme requests to test its functionality, including crash recovery.
 
 A hardware abstraction layer can be found in `flash.h` and `flash.c`. Flash read, write and erase functions are different depending on if lilotafs is being compiled for the esp32, or on a computer for testing. lilotafs can be run on the host computer by writing to a binary file filled with `0xFF` bytes, generated with:
 ```bash
@@ -425,7 +425,7 @@ Some settings may need to be changed with the shell locale to run this command.
 
 ### 6.1. Torture Basics
 
-The file system is subjected to a series of random write: random data of random length is written to a random file. At the start, we choose a number of random file names, and subsequent `write` calls will choose a file from this name to write to. Simulteneously, the correct value of each file is maintained in memory. The file system is inspected periodically with `read` calls, and the contents of the file system is compared with the correct value stored in memory. If the file system runs out of spaced, a reboot is simulated by unmounting and remounting the file system, during which wear leveling will take place, hopefully reclaiming enough space to proceed with the torture test.
+The file system is subjected to a series of random write: random data of random length is written to a random file. At the start, we choose a number of random file names, and subsequent `write` calls will choose a file from this name to write to. At the same time, the correct value of each file is maintained in memory. The file system is inspected periodically with `read` calls, and the contents of the file system is compared with the correct value stored in memory. If the file system runs out of spaced, a reboot is simulated by unmounting and remounting the file system, during which wear leveling will take place, hopefully reclaiming enough space to proceed with the torture test.
 
 ### 6.2. Crash Injection
 
