@@ -414,3 +414,26 @@ If a crash occurs during wear leveling, it will be detected and processed when f
  - `LILOTAFS_START` is found and is immediately followed by `LILOTAFS_START` (crash in the final step), the first header with `LILOTAFS_START` is deleted by setting its magic number to `0` and the second is made the head.
 
 ## 6. Torture Testing
+
+This repository also includes a torture testing suite `torture_util.c`, `torture_util.h`, `torture.c`, `megatorture.py` to subjet the file system to extreme requests to test its functionality, including crash recovery.
+
+A hardware abstraction layer can be found in `flash.h` and `flash.c`. Flash read, write and erase functions are different depending on if lilotafs is being compiled for the esp32, or on a computer for testing. lilotafs can be run on the host computer by writing to a binary file filled with `0xFF` bytes, generated with:
+```bash
+dd if=/dev/zero bs=$(TOTAL_SIZE) count=1 | tr '\000' '\377' > disk.bin
+```
+Some settings may need to be changed with the shell locale to run this command.
+
+### 6.1. Torture Basics
+
+The file system is subjected to a series of random write: random data of random length is written to a random file. At the start, we choose a number of random file names, and subsequent `write` calls will choose a file from this name to write to. Simulteneously, the correct value of each file is maintained in memory. The file system is inspected periodically with `read` calls, and the contents of the file system is compared with the correct value stored in memory. If the file system runs out of spaced, a reboot is simulated by unmounting and remounting the file system, during which wear leveling will take place, hopefully reclaiming enough space to proceed with the torture test.
+
+### 6.2. Crash Injection
+
+To test crash recovery, we first need to be able to inject crashes. This is done through long jumps. After a random number of bytes written to the file system, a "crash" is simulated by jumping to the main torture loop with `setjmp` and `lompjmp`. Back in the main torture loop, the file system is remounted, and the file system is checked against the model of the file system stored in memory for crash recovery correctness. Note that the file written to when the crash occurred can either hold the new contents or the old contents, both of which are counted as correct.
+
+### 6.3. Automation
+
+At the start of each torture test, the random number generator is either seeded with the time or with a user-provided argument. This is to ensure each torture test instance can be recreated for debugging.
+
+The `megatorture.py` file automatically runs a large number of torture tests. If a torture test does not pass by containing files with different contents as the correct contents stored in memory, or by returning an error, the seed for the trial is printed for debugging.
+
